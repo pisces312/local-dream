@@ -2015,17 +2015,18 @@ GenerationResult generateImage(
 
     // --- Scheduler & Latents ---
     std::unique_ptr<Scheduler> scheduler;
+    const char *timestep_spacing = sdxl_mode ? "trailing" : "leading";
     if (scheduler_type == "euler_a" || scheduler_type == "eulera" ||
         scheduler_type == "euler_a_karras") {
       bool use_karras = (scheduler_type == "euler_a_karras");
       scheduler = std::make_unique<EulerAncestralDiscreteScheduler>(
-          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading", 0,
-          false, use_karras);
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", timestep_spacing,
+          0, false, use_karras);
     } else if (scheduler_type == "euler" || scheduler_type == "euler_karras") {
       bool use_karras = (scheduler_type == "euler_karras");
       scheduler = std::make_unique<EulerDiscreteScheduler>(
-          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading", 0,
-          false, use_karras);
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", timestep_spacing,
+          0, false, use_karras);
     } else if (scheduler_type == "lcm") {
       scheduler = std::make_unique<LCMScheduler>(1000, 0.00085f, 0.012f,
                                                  "scaled_linear", "epsilon", 50,
@@ -2034,14 +2035,14 @@ GenerationResult generateImage(
                scheduler_type == "dpm_sde_karras") {
       bool use_karras = (scheduler_type == "dpm_sde_karras");
       scheduler = std::make_unique<DPMSolverMultistepScheduler>(
-          1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon", "leading",
-          use_karras, "sde-dpmsolver++");
+          1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon",
+          timestep_spacing, use_karras, "sde-dpmsolver++");
     } else {
       // Default to DPM solver; "dpm_karras" enables Karras sigma schedule.
       bool use_karras = (scheduler_type == "dpm_karras");
       scheduler = std::make_unique<DPMSolverMultistepScheduler>(
-          1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon", "leading",
-          use_karras);
+          1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon",
+          timestep_spacing, use_karras);
     }
     if (use_v_pred) scheduler->set_prediction_type("v_prediction");
     scheduler->set_timesteps(steps);
