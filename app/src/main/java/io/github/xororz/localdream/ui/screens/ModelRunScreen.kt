@@ -176,6 +176,7 @@ import io.github.xororz.localdream.ui.components.GenerationParamsDialog
 import io.github.xororz.localdream.ui.components.ImportParametersDialog
 import io.github.xororz.localdream.ui.components.OverlayIconButton
 import io.github.xororz.localdream.ui.components.PromptTagTextField
+import io.github.xororz.localdream.ui.components.ReproduceParametersDialog
 import io.github.xororz.localdream.ui.components.ShareParametersDialog
 import io.github.xororz.localdream.ui.components.ZoomableImageOverlay
 import io.github.xororz.localdream.utils.ImportedParams
@@ -443,7 +444,7 @@ fun ModelRunScreen(
     var showHistoryDetailDialog by remember { mutableStateOf(false) }
     var showHistoryParametersDialog by remember { mutableStateOf(false) }
     var showDeleteHistoryDialog by remember { mutableStateOf(false) }
-    var showSeedConfirmDialog by remember { mutableStateOf(false) }
+    var showReproduceParamsDialog by remember { mutableStateOf(false) }
     var pendingReproduceParams by remember { mutableStateOf<GenerationParameters?>(null) }
 
     // Parameter share state
@@ -3139,7 +3140,7 @@ fun ModelRunScreen(
                         generationParams?.let {
                             pendingReproduceParams = it
                             showParametersDialog = false
-                            showSeedConfirmDialog = true
+                            showReproduceParamsDialog = true
                         }
                     },
                     onDismiss = { showParametersDialog = false },
@@ -3937,98 +3938,67 @@ fun ModelRunScreen(
             onReproduce = {
                 pendingReproduceParams = selectedHistoryItem!!.params
                 showHistoryParametersDialog = false
-                showSeedConfirmDialog = true
+                showReproduceParamsDialog = true
             },
             onDismiss = { showHistoryParametersDialog = false },
         )
     }
 
-    // Seed confirmation dialog for reproduce
-    if (showSeedConfirmDialog && pendingReproduceParams != null) {
+    // Reproduce parameters dialog
+    if (showReproduceParamsDialog && pendingReproduceParams != null) {
         val params = pendingReproduceParams!!
-        AlertDialog(
-            onDismissRequest = {
-                showSeedConfirmDialog = false
+        ReproduceParametersDialog(
+            params = params,
+            onApply = { selectedFields ->
+                if (ParamShareField.PROMPT in selectedFields) {
+                    prompt = params.prompt
+                    promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
+                    promptSuggestions = emptyList()
+                }
+                if (ParamShareField.NEGATIVE_PROMPT in selectedFields) {
+                    negativePrompt = params.negativePrompt
+                    negativePromptFieldValue =
+                        TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                    negativePromptSuggestions = emptyList()
+                }
+                if (ParamShareField.STEPS in selectedFields) {
+                    steps = params.steps.toFloat()
+                }
+                if (ParamShareField.CFG in selectedFields) {
+                    cfg = params.cfg
+                }
+                if (ParamShareField.SEED in selectedFields) {
+                    seed = params.seed?.toString() ?: ""
+                }
+                if (ParamShareField.SCHEDULER in selectedFields) {
+                    scheduler = params.scheduler
+                }
+                if (ParamShareField.DENOISE_STRENGTH in selectedFields) {
+                    denoiseStrength = params.denoiseStrength
+                }
+                if (model?.isSdxl == true) {
+                    val newRatio = inferAspectRatioString(params.width, params.height)
+                    if (newRatio != aspectRatio) {
+                        aspectRatio = newRatio
+                        clearImg2imgState()
+                    }
+                }
+                saveAllFields()
+
+                showReproduceParamsDialog = false
+                pendingReproduceParams = null
+                showHistoryDetailDialog = false
+                selectedHistoryItem = null
+                scope.launch {
+                    pagerState.animateScrollToPage(0)
+                }
+            },
+            onDismiss = {
+                showReproduceParamsDialog = false
                 pendingReproduceParams = null
                 showHistoryDetailDialog = false
                 selectedHistoryItem = null
             },
-            title = { Text(stringResource(R.string.use_same_seed_title)) },
-            text = { Text(stringResource(R.string.use_same_seed_message, params.seed ?: "")) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        // Apply parameters with seed
-                        prompt = params.prompt
-                        negativePrompt = params.negativePrompt
-                        promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
-                        negativePromptFieldValue =
-                            TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
-                        promptSuggestions = emptyList()
-                        negativePromptSuggestions = emptyList()
-                        cfg = params.cfg
-                        steps = params.steps.toFloat()
-                        seed = params.seed?.toString() ?: ""
-                        scheduler = params.scheduler
-                        if (model?.isSdxl == true) {
-                            val newRatio = inferAspectRatioString(params.width, params.height)
-                            if (newRatio != aspectRatio) {
-                                aspectRatio = newRatio
-                                clearImg2imgState()
-                            }
-                        }
-                        saveAllFields()
-
-                        // Close dialogs and switch to prompt page
-                        showSeedConfirmDialog = false
-                        pendingReproduceParams = null
-                        showHistoryDetailDialog = false
-                        selectedHistoryItem = null
-                        scope.launch {
-                            pagerState.animateScrollToPage(0)
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.yes))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        // Apply parameters without seed
-                        prompt = params.prompt
-                        negativePrompt = params.negativePrompt
-                        promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
-                        negativePromptFieldValue =
-                            TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
-                        promptSuggestions = emptyList()
-                        negativePromptSuggestions = emptyList()
-                        cfg = params.cfg
-                        steps = params.steps.toFloat()
-                        seed = ""  // Don't copy seed
-                        scheduler = params.scheduler
-                        if (model?.isSdxl == true) {
-                            val newRatio = inferAspectRatioString(params.width, params.height)
-                            if (newRatio != aspectRatio) {
-                                aspectRatio = newRatio
-                                clearImg2imgState()
-                            }
-                        }
-                        saveAllFields()
-
-                        // Close dialogs and switch to prompt page
-                        showSeedConfirmDialog = false
-                        pendingReproduceParams = null
-                        showHistoryDetailDialog = false
-                        selectedHistoryItem = null
-                        scope.launch {
-                            pagerState.animateScrollToPage(0)
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.no))
-                }
-            }
         )
     }
 

@@ -99,8 +99,6 @@
     <string name="no_history_hint">生成後に履歴が保存されます</string>
     <string name="selected_items_count">%d 件を選択中</string>
     <string name="generation_params_title">生成パラメータ</string>
-    <string name="use_same_seed_title">同じシードを使用しますか？</string>
-    <string name="use_same_seed_message">同じシード値（%s）を使用して画像を再現しますか？</string>
     <string name="delete_image">画像を削除</string>
     <string name="delete_image_confirm">この画像を削除してもよろしいですか? この操作は元に戻せません。</string>
     <string name="deleted">削除済み</string>
@@ -127,6 +125,10 @@
     <string name="use_last_seed">最後に利用したシードを利用 (%s)</string>
     <string name="batch_count">生成枚数: %d</string>
     <string name="reproduce">コピー</string>
+    <string name="reproduce_params_title">パラメータを再現</string>
+    <string name="reproduce_params_hint">プロンプトページに適用する項目を選択してください。</string>
+    <string name="select_all">すべて選択</string>
+    <string name="deselect_all">すべて解除</string>
     <string name="result_params">ステップ: %s / CFG: %.1f / シード: %s</string>
     <string name="result_params_2">サイズ: %s×%s / 処理時間: %s / %s</string>
     <string name="params_detail">パラメータの詳細</string>

@@ -111,8 +111,6 @@
     <string name="no_history_hint">开始生成图片后会自动保存</string>
     <string name="selected_items_count">已选 %d 项</string>
     <string name="generation_params_title">生成参数</string>
-    <string name="use_same_seed_title">使用相同的种子吗？</string>
-    <string name="use_same_seed_message">是否使用相同的种子值 (%s) 来重现图片？\n\n选择\"是\"将使用相同种子，选择\"否\"将仅复用参数。</string>
     <string name="delete_image">删除图片</string>
     <string name="delete_image_confirm">确定要删除这张图片吗？此操作无法撤销。</string>
     <string name="deleted">已删除</string>
@@ -141,6 +139,10 @@
     <string name="use_last_seed">使用上次的种子 (%s)</string>
     <string name="batch_count">批次数量: %d</string>
     <string name="reproduce">复制</string>
+    <string name="reproduce_params_title">复用参数</string>
+    <string name="reproduce_params_hint">选择要应用到提示词页面的字段。</string>
+    <string name="select_all">全选</string>
+    <string name="deselect_all">全不选</string>
     <string name="result_params">步数: %s / CFG: %.1f / 种子: %s</string>
     <string name="result_params_2">尺寸: %sx%s / 耗时: %s / %s</string>
     <string name="params_detail">生成参数详情</string>
