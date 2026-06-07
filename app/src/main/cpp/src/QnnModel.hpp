@@ -219,16 +219,11 @@ class QnnModel : public QnnSampleApp {
 
     // get output
     if (StatusCode::SUCCESS == returnStatus) {
-      float *tmp = nullptr;
       if (qnn::tools::iotensor::StatusCode::SUCCESS !=
-          m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
+          m_ioTensor.convertToFloatInto(text_embedding, &outputs[0])) {
         returnStatus = StatusCode::FAILURE;
         return returnStatus;
       }
-
-      uint32_t elementCount = 1 * 77 * text_embedding_size;
-      memcpy(text_embedding, tmp, elementCount * sizeof(float));
-      free(tmp);
     }
 
     return returnStatus;
@@ -311,16 +306,11 @@ class QnnModel : public QnnSampleApp {
 
     // get output
     if (StatusCode::SUCCESS == returnStatus) {
-      float *tmp = nullptr;
       if (qnn::tools::iotensor::StatusCode::SUCCESS !=
-          m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
+          m_ioTensor.convertToFloatInto(latents_pred, &outputs[0])) {
         returnStatus = StatusCode::FAILURE;
         return returnStatus;
       }
-
-      int elementCount = 1 * 4 * sample_width * sample_height;
-      memcpy(latents_pred, tmp, elementCount * sizeof(float));
-      free(tmp);
     }
 
     return returnStatus;
@@ -385,27 +375,15 @@ class QnnModel : public QnnSampleApp {
 
     // get output
     if (StatusCode::SUCCESS == returnStatus) {
-      {
-        float *tmp = nullptr;
-        int elementCount = 1 * 4 * sample_width * sample_height;
-        if (qnn::tools::iotensor::StatusCode::SUCCESS !=
-            m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
-          returnStatus = StatusCode::FAILURE;
-          return returnStatus;
-        }
-        memcpy(mean, tmp, elementCount * sizeof(float));
-        free(tmp);
+      if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+          m_ioTensor.convertToFloatInto(mean, &outputs[0])) {
+        returnStatus = StatusCode::FAILURE;
+        return returnStatus;
       }
-      {
-        float *tmp = nullptr;
-        int elementCount = 1 * 4 * sample_width * sample_height;
-        if (qnn::tools::iotensor::StatusCode::SUCCESS !=
-            m_ioTensor.convertToFloat(&tmp, &outputs[1])) {
-          returnStatus = StatusCode::FAILURE;
-          return returnStatus;
-        }
-        memcpy(std, tmp, elementCount * sizeof(float));
-        free(tmp);
+      if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+          m_ioTensor.convertToFloatInto(std, &outputs[1])) {
+        returnStatus = StatusCode::FAILURE;
+        return returnStatus;
       }
     }
     return returnStatus;
@@ -469,15 +447,11 @@ class QnnModel : public QnnSampleApp {
 
     // get output
     if (StatusCode::SUCCESS == returnStatus) {
-      float *tmp = nullptr;
-      int elementCount = 1 * 3 * output_width * output_height;
       if (qnn::tools::iotensor::StatusCode::SUCCESS !=
-          m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
+          m_ioTensor.convertToFloatInto(pixel_values, &outputs[0])) {
         returnStatus = StatusCode::FAILURE;
         return returnStatus;
       }
-      memcpy(pixel_values, tmp, elementCount * sizeof(float));
-      free(tmp);
     }
     return returnStatus;
   }

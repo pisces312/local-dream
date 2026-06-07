@@ -112,6 +112,64 @@ diff --git a/3rdparty/SampleApp/src/QnnSampleApp.hpp b/3rdparty/SampleApp/src/Qn
    StatusCode extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle);
  
    StatusCode extractProfilingSubEvents(QnnProfile_EventId_t profileEventId);
+diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.cpp b/3rdparty/SampleApp/src/Utils/IOTensor.cpp
+--- a/3rdparty/SampleApp/src/Utils/IOTensor.cpp
++++ b/3rdparty/SampleApp/src/Utils/IOTensor.cpp
+@@ -581,13 +581,37 @@
+   }
+   std::vector<size_t> dims;
+   fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(tensor), QNN_TENSOR_GET_RANK(tensor));
+-  auto returnStatus   = StatusCode::SUCCESS;
+   size_t elementCount = datautil::calculateElementCount(dims);
+-  returnStatus        = allocateBuffer<float>(out, elementCount);
++  auto returnStatus   = allocateBuffer<float>(out, elementCount);
+   if (StatusCode::SUCCESS != returnStatus) {
+     QNN_ERROR("failure in allocateBuffer<float>");
+     return returnStatus;
+   }
++  returnStatus = convertToFloatInto(*out, tensor);
++  if (StatusCode::SUCCESS != returnStatus && *out != nullptr) {
++    QNN_DEBUG("freeing *out");
++    free(*out);
++    *out = nullptr;
++  }
++  return returnStatus;
++}
++
++// Convert a typed/quantized output tensor directly into a caller-owned float
++// buffer (sized to the tensor element count). Avoids the allocate + memcpy +
++// free dance the float** overload forces on callers that already have a
++// destination buffer.
++iotensor::StatusCode iotensor::IOTensor::convertToFloatInto(float* dst, Qnn_Tensor_t* tensor) {
++  if (nullptr == tensor) {
++    QNN_ERROR("tensors is nullptr");
++    return StatusCode::FAILURE;
++  }
++  // Alias so the existing *out-based conversion body writes straight into dst.
++  float* outBuf = dst;
++  float** out   = &outBuf;
++  std::vector<size_t> dims;
++  fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(tensor), QNN_TENSOR_GET_RANK(tensor));
++  auto returnStatus   = StatusCode::SUCCESS;
++  size_t elementCount = datautil::calculateElementCount(dims);
+   switch (QNN_TENSOR_GET_DATA_TYPE(tensor)) {
+     case QNN_DATATYPE_UFIXED_POINT_8:
+       if (datautil::StatusCode::SUCCESS !=
+@@ -719,13 +743,7 @@
+       returnStatus = StatusCode::FAILURE;
+       break;
+   }
+-  if (StatusCode::SUCCESS != returnStatus) {
+-    QNN_DEBUG("freeing *out");
+-    if (*out != nullptr) {
+-      free(*out);
+-      *out = nullptr;
+-    }
+-  }
++  // dst is caller-owned; never freed here.
+   return returnStatus;
+ }
+ 
 diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.hpp b/3rdparty/SampleApp/src/Utils/IOTensor.hpp
 --- a/3rdparty/SampleApp/src/Utils/IOTensor.hpp
 +++ b/3rdparty/SampleApp/src/Utils/IOTensor.hpp
@@ -124,3 +182,12 @@ diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.hpp b/3rdparty/SampleApp/src/
    PopulateInputTensorsRetType_t populateInputTensor(const std::vector<std::string> &filePaths,
                                                      const size_t filePathsIndexOffset,
                                                      const bool loopBackToStart,
+@@ -91,6 +91,8 @@
+ #ifndef __hexagon__
+   StatusCode convertToFloat(float **out, Qnn_Tensor_t *output);
+ 
++  StatusCode convertToFloatInto(float *dst, Qnn_Tensor_t *output);
++
+   StatusCode convertAndWriteOutputTensorInFloat(Qnn_Tensor_t *output,
+                                                 std::vector<std::string> outputPaths,
+                                                 std::string fileName,
