@@ -53,9 +53,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1988,6 +1990,10 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // Reserve the IME area so the scroll viewport ends above the
+                // keyboard; the focused prompt field is then scrolled above the IME
+                // (which also keeps its window position accurate for the popup).
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -3877,7 +3883,12 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                     state = pagerState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        // Mark the Scaffold insets (incl. the navigation bar) as
+                        // consumed so the prompt page's imePadding only reserves the
+                        // remaining IME height, instead of double-counting the nav
+                        // bar and leaving a background strip above the keyboard.
+                        .consumeWindowInsets(paddingValues),
                 ) { page ->
                     when (page) {
                         0 -> PromptPage()
