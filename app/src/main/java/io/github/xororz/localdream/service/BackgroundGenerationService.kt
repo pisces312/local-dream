@@ -281,7 +281,9 @@ class BackgroundGenerationService : Service() {
                 put("denoise_strength", denoiseStrength)
                 put("use_opencl", useOpenCL)
                 put("scheduler", scheduler)
-                put("show_diffusion_process", showProcess)
+                // Ultrafix never streams previews: each one would tile-decode
+                // the full image (the backend rejects it as well).
+                put("show_diffusion_process", if (ultrafix) false else showProcess)
                 put("show_diffusion_stride", showStride)
                 if (ultrafix) {
                     put("ultrafix", true)

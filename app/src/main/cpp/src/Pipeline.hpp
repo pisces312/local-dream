@@ -588,9 +588,14 @@ inline xt::xarray<float> Pipeline::runUnetTiled(
   const int full_w = sample_width;
   const int full_h = sample_height;
   const int min_overlap = tile_lat / 4;
-  // The UNet downsamples its latent input by 8x internally (SD1.5; SDXL
-  // uses 4x, which 8 also satisfies); tile origins must stay on that grid.
-  const int grid_align = 8;
+  // Tile origins must stay on the UNet's internal downsampling grid: 4 for
+  // SDXL (128 -> 64 -> 32), 8 for SD1.5 (64 -> ... -> 8). Using the exact
+  // factor matters for SDXL: custom-aspect sizes (e.g. 3:2 -> 2720px,
+  // latent 340) leave dim - tile = 4 (mod 8), so the edge-clamped last tile
+  // could never 8-align, ghosting its overlap band - but every SDXL
+  // ultrafix latent dim is a multiple of 4, so factor-4 alignment always
+  // holds exactly.
+  const int grid_align = sdxl_ ? 4 : 8;
 
   auto [positions, overlap_x, overlap_y] = calculate_latent_tile_grid(
       full_w, full_h, tile_lat, min_overlap, grid_align);
@@ -894,6 +899,10 @@ inline GenerationResult Pipeline::generate(
       // (they cost one guidance-free tiled UNet round each).
       if (req.ultrafix) {
         auto inv_start = std::chrono::high_resolution_clock::now();
+        // The inversion runs the UNet before the denoising loop; let lowram
+        // pipelines swap the VAE encoder out for the UNet now (idempotent,
+        // called again before the loop).
+        beginDenoise(req);
         total_run_steps +=
             (int)ultrafixInversionLadder((int)timesteps.size(), start_step)
                 .size();

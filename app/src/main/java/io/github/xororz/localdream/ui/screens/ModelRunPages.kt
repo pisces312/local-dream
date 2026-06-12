@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Report
@@ -100,6 +102,10 @@ internal fun ModelRunResultPage(
     upscaleEnabled: Boolean,
     showUltrafixButton: Boolean,
     ultrafixEnabled: Boolean,
+    // null when the displayed image has no history row to mark (hides the
+    // favorite button).
+    isFavorite: Boolean?,
+    onFavoriteClick: () -> Unit,
     onReportClick: () -> Unit,
     onUpscaleClick: () -> Unit,
     onUltrafixClick: () -> Unit,
@@ -194,6 +200,21 @@ internal fun ModelRunResultPage(
                                         8.dp,
                                     ),
                                 ) {
+                                    if (isFavorite != null) {
+                                        FilledTonalIconButton(
+                                            onClick = onFavoriteClick,
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isFavorite) {
+                                                    Icons.Default.Favorite
+                                                } else {
+                                                    Icons.Default.FavoriteBorder
+                                                },
+                                                contentDescription = "toggle favorite",
+                                            )
+                                        }
+                                    }
+
                                     if (showReportButton) {
                                         FilledTonalIconButton(
                                             onClick = onReportClick,
@@ -524,6 +545,18 @@ internal fun ModelRunHistoryPage(
                                                     alpha = 0.2f,
                                                 ),
                                             ),
+                                    )
+                                }
+
+                                if (item.favorite) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "favorited",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(6.dp)
+                                            .size(16.dp),
                                     )
                                 }
 

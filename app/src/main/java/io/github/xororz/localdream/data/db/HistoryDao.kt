@@ -22,6 +22,9 @@ interface HistoryDao {
     @Query("SELECT * FROM generation_history WHERE id = :id")
     suspend fun getById(id: Long): HistoryEntity?
 
+    @Query("UPDATE generation_history SET favorite = :favorite WHERE id = :id")
+    suspend fun setFavorite(id: Long, favorite: Boolean): Int
+
     @RawQuery(observedEntities = [HistoryEntity::class])
     fun query(q: SupportSQLiteQuery): Flow<List<HistoryEntity>>
 

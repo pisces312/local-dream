@@ -35,6 +35,7 @@ data class HistoryFilter(
     val schedulers: Set<String>? = null,
     val devices: Set<DeviceFilter>? = null,
     val promptSubstring: String? = null,
+    val favoritesOnly: Boolean = false,
     val descending: Boolean = true,
 ) {
     fun toSqlQuery(): SupportSQLiteQuery {
@@ -84,6 +85,9 @@ data class HistoryFilter(
             where += "(INSTR(prompt, ?) > 0 OR INSTR(negativePrompt, ?) > 0)"
             args += promptSubstring
             args += promptSubstring
+        }
+        if (favoritesOnly) {
+            where += "favorite = 1"
         }
 
         val whereClause = if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"

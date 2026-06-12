@@ -91,7 +91,7 @@
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">モデルなし</string>
     <string name="no_npu_models">モデルなし</string>
-    <string name="img2img_hint">img2img機能を使用します。必要がない場合や問題が発生した場合はオフにしてください。オフにするとSDXLのアスペクト比指定も無効になります。</string>
+    <string name="img2img_hint">img2img機能を使用します。必要がない場合や問題が発生した場合はオフにしてください。オフにするとSDXLのアスペクト比指定とUltraFixも無効になります。</string>
     <string name="show_process">生成プロセスを表示</string>
     <string name="show_process_hint">NPU モデル専用機能です。</string>
     <string name="preview_stride">プレビューストライド</string>
@@ -265,10 +265,9 @@
     <string name="upscaling_image">画像のアップスケール中…</string>
     <string name="upscale_failed">アップスケールに失敗しました: %s</string>
     <string name="ultrafix">UltraFix</string>
-    <string name="ultrafix_confirm_hint">UltraFixは以下のパラメータでタイル分割img2imgを実行し、画像全体を補正します。低めのノイズ除去強度(0.3-0.5)を推奨します。処理には時間がかかるため、デバイスが高温の時は使用しないでください。パラメータを変更する場合は先にプロンプトページで編集してください。</string>
+    <string name="ultrafix_confirm_hint">UltraFixは以下のパラメータでタイル分割img2imgを実行し、画像全体を補正します。ノイズ除去強度は0.5以下を推奨します。処理には時間がかかるため、デバイスが高温の時は使用しないでください。パラメータを変更する場合は先にプロンプトページで編集してください。</string>
     <string name="ultrafix_params">画像: %1$dx%2$d\nタイル: %3$dpx\nステップ: %4$d\nCFG: %5$s\nノイズ除去強度: %6$s\nスケジューラ: %7$s\nシード: %8$s</string>
     <string name="ultrafix_seed_random">ランダム</string>
-    <string name="ultrafix_square_required">UltraFixには正方形の生成サイズ(例: 512x512)が必要です。先に詳細設定で解像度を切り替えてください。</string>
     <string name="ultrafix_preparing">UltraFixを準備中…</string>
     <string name="ultrafix_failed">UltraFixに失敗しました: %s</string>
     <string name="download_model_first">まずモデルをダウンロードしてください</string>
@@ -323,6 +322,8 @@
     <string name="history_filter_current_model_only">現在のモデルのみ</string>
     <string name="history_filter_all_models">すべてのモデル</string>
     <string name="history_filter_all">すべて</string>
+    <string name="history_filter_favorites">お気に入り</string>
+    <string name="history_filter_favorites_only">お気に入りのみ</string>
     <string name="history_filter_modes">モード</string>
     <string name="history_filter_time_range">期間</string>
     <string name="history_filter_time_any">指定なし</string>

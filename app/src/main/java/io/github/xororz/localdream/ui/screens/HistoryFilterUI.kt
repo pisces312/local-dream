@@ -153,6 +153,7 @@ private fun HistoryFilter.hasAdvancedFilters(): Boolean = modes != null ||
     schedulers != null ||
     devices != null ||
     !promptSubstring.isNullOrBlank() ||
+    favoritesOnly ||
     !descending
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -208,6 +209,18 @@ fun HistoryFilterSheet(
                             label = { Text(label) },
                         )
                     }
+                }
+            }
+
+            Section(stringResource(R.string.history_filter_favorites)) {
+                ChipRow {
+                    ToneFilterChip(
+                        selected = draft.favoritesOnly,
+                        onClick = {
+                            draft = draft.copy(favoritesOnly = !draft.favoritesOnly)
+                        },
+                        label = { Text(stringResource(R.string.history_filter_favorites_only)) },
+                    )
                 }
             }
 

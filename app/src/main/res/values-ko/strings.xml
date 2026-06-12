@@ -98,7 +98,7 @@
     <string name="npu_models">NPU 모델</string>
     <string name="no_cpu_models">모델 없음</string>
     <string name="no_npu_models">모델 없음</string>
-    <string name="img2img_hint">img2img 기능을 사용합니다. 필요하지 않거나 문제가 발생하면 끄세요. 끄면 SDXL 화면비 기능도 비활성화됩니다.</string>
+    <string name="img2img_hint">img2img 기능을 사용합니다. 필요하지 않거나 문제가 발생하면 끄세요. 끄면 SDXL 화면비 기능과 UltraFix도 비활성화됩니다.</string>
     <string name="show_process">생성 과정 표시</string>
     <string name="show_process_hint">NPU 모델에서만 작동합니다. 중간 생성 스텝을 표시합니다. 생성 속도가 느려지므로 과정이 궁금할 때만 켜세요.</string>
     <string name="preview_stride">미리보기 간격</string>
@@ -295,10 +295,9 @@
 
     <!-- UltraFix -->
     <string name="ultrafix">UltraFix</string>
-    <string name="ultrafix_confirm_hint">UltraFix는 아래 매개변수로 타일 기반 img2img를 실행하여 이미지 전체를 보정합니다. 낮은 디노이즈 강도(0.3-0.5)를 권장합니다. 처리 시간이 오래 걸리므로 기기가 과열된 상태에서는 사용하지 마세요. 매개변수를 변경하려면 먼저 프롬프트 페이지에서 수정하세요.</string>
+    <string name="ultrafix_confirm_hint">UltraFix는 아래 매개변수로 타일 기반 img2img를 실행하여 이미지 전체를 보정합니다. 디노이즈 강도는 0.5 이하를 권장합니다. 처리 시간이 오래 걸리므로 기기가 과열된 상태에서는 사용하지 마세요. 매개변수를 변경하려면 먼저 프롬프트 페이지에서 수정하세요.</string>
     <string name="ultrafix_params">이미지: %1$dx%2$d\n타일: %3$dpx\n스텝: %4$d\nCFG: %5$s\n디노이즈 강도: %6$s\n스케줄러: %7$s\n시드: %8$s</string>
     <string name="ultrafix_seed_random">랜덤</string>
-    <string name="ultrafix_square_required">UltraFix는 정사각형 생성 크기(예: 512x512)가 필요합니다. 먼저 고급 설정에서 해상도를 전환하세요.</string>
     <string name="ultrafix_preparing">UltraFix 준비 중…</string>
     <string name="ultrafix_failed">UltraFix에 실패했습니다: %s</string>
     <string name="download_model_first">먼저 모델을 다운로드하세요</string>
@@ -353,6 +352,8 @@
     <string name="history_filter_current_model_only">현재 모델만</string>
     <string name="history_filter_all_models">모든 모델</string>
     <string name="history_filter_all">전체</string>
+    <string name="history_filter_favorites">즐겨찾기</string>
+    <string name="history_filter_favorites_only">즐겨찾기만</string>
     <string name="history_filter_modes">모드</string>
     <string name="history_filter_time_range">기간</string>
     <string name="history_filter_time_any">전체 기간</string>

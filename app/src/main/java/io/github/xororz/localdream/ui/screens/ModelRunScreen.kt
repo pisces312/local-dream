@@ -76,6 +76,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
@@ -87,6 +88,8 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
@@ -514,7 +517,6 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     // pendingUltrafix marks the in-flight generation as an ultrafix run so the
     // completion handler can record the right mode.
     var showUltrafixConfirmDialog by remember { mutableStateOf(false) }
-    var showUltrafixSquareDialog by remember { mutableStateOf(false) }
     var pendingUltrafix by remember { mutableStateOf(false) }
     var isUltrafixPreparing by remember { mutableStateOf(false) }
     val upscalerRepository = remember { UpscalerRepository.getInstance(context) }
@@ -1188,6 +1190,25 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             cleanup()
+        }
+    }
+
+    // Seed the result page with the most recent history image when nothing
+    // has been generated this session yet; the empty state only remains for
+    // models without any history. Re-checked after the decode so a result
+    // that completed meanwhile is never overwritten.
+    LaunchedEffect(historyItems) {
+        if (currentBitmap != null) return@LaunchedEffect
+        val item = historyItems.firstOrNull() ?: return@LaunchedEffect
+        val bitmap = withContext(Dispatchers.IO) {
+            BitmapFactory.decodeFile(item.imageFile.absolutePath)
+        }
+        if (bitmap != null && currentBitmap == null) {
+            currentBitmap = bitmap
+            generationParams = item.params
+            generationParamsModelId = item.modelId
+            currentDisplayedHistoryId = item.id
+            imageVersion++
         }
     }
 
@@ -1870,7 +1891,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     )
                                 }
                             },
-                            enabled = serviceState !is GenerationState.Progress && !isRunning && !isUpscaling,
+                            enabled = serviceState !is GenerationState.Progress &&
+                                !isRunning && !isUpscaling && !isUltrafixPreparing,
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.medium,
                         ) {
@@ -2266,28 +2288,38 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                             // Upscaling is only offered for the NPU runtime and resolutions <= 1024
                             showUpscaleButton = !model.runOnCpu &&
                                 generationParams?.let { maxOf(it.width, it.height) <= 1024 } == true,
-                            upscaleEnabled = !isRunning && !isUpscaling,
-                            // Ultrafix takes over where upscaling stops: NPU-only,
-                            // image larger than the upscale ceiling, and every
-                            // UNet/VAE tile must fit inside the shorter edge.
-                            // It is tiled img2img, so the backend must have been
-                            // started with its VAE encoder (useImg2img).
-                            showUltrafixButton = useImg2img && !model.runOnCpu &&
+                            upscaleEnabled = !isRunning && !isUpscaling && !isUltrafixPreparing,
+                            // Ultrafix takes over where upscaling stops: SDXL
+                            // only (SD1.5 quality was not worth it), restricted
+                            // to DMD2-class few-step checkpoints (detected via
+                            // cfg = 1 - the inversion/injection recipe is tuned
+                            // for that regime), image larger than the upscale
+                            // ceiling, every UNet/VAE tile fitting inside the
+                            // shorter edge, and a backend started with its VAE
+                            // encoder (useImg2img).
+                            showUltrafixButton = useImg2img && model.isSdxl &&
+                                cfg == 1f &&
                                 generationParams?.let {
                                     maxOf(it.width, it.height) > 1024 &&
                                         minOf(it.width, it.height) >=
                                         maxOf(currentWidth, currentHeight, 512)
                                 } == true,
                             ultrafixEnabled = !isRunning && !isUpscaling && !isUltrafixPreparing,
-                            onReportClick = { showReportDialog = true },
-                            onUpscaleClick = { showUpscalerDialog = true },
-                            onUltrafixClick = {
-                                if (model.isSdxl || currentWidth == currentHeight) {
-                                    showUltrafixConfirmDialog = true
-                                } else {
-                                    showUltrafixSquareDialog = true
+                            isFavorite = historyItems
+                                .find { it.id == currentDisplayedHistoryId }
+                                ?.favorite,
+                            onFavoriteClick = {
+                                val item = historyItems
+                                    .find { it.id == currentDisplayedHistoryId }
+                                if (item != null) {
+                                    scope.launch(Dispatchers.IO) {
+                                        historyManager.setFavorite(item.id, !item.favorite)
+                                    }
                                 }
                             },
+                            onReportClick = { showReportDialog = true },
+                            onUpscaleClick = { showUpscalerDialog = true },
+                            onUltrafixClick = { showUltrafixConfirmDialog = true },
                             onSaveClick = { bitmap ->
                                 handleSaveImage(
                                     context = context,
@@ -2506,21 +2538,6 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
         )
     }
 
-    // Ultrafix: SD1.5 with a non-square generation size cannot tile (the UNet
-    // graph is square); ask the user to switch resolution first.
-    if (showUltrafixSquareDialog) {
-        AlertDialog(
-            onDismissRequest = { showUltrafixSquareDialog = false },
-            title = { Text(stringResource(R.string.ultrafix)) },
-            text = { Text(stringResource(R.string.ultrafix_square_required)) },
-            confirmButton = {
-                TextButton(onClick = { showUltrafixSquareDialog = false }) {
-                    Text(stringResource(R.string.confirm))
-                }
-            },
-        )
-    }
-
     // Ultrafix parameter confirmation.
     if (showUltrafixConfirmDialog) {
         val randomSeedLabel = stringResource(R.string.ultrafix_seed_random)
@@ -2624,8 +2641,11 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                             width = upscaledBitmap.width,
                                             height = upscaledBitmap.height,
                                         )
-                                        val sourceMode = selectedHistoryItem?.mode
-                                            ?: GenerationMode.UNKNOWN
+                                        // The displayed image's params carry its
+                                        // generation mode (set on completion and
+                                        // by every history-load path), so the
+                                        // upscaled copy inherits the right one.
+                                        val sourceMode = params.mode
                                         val saved = historyManager.saveGeneratedImage(
                                             modelId = modelId,
                                             bitmap = upscaledBitmap,
@@ -2723,6 +2743,30 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             showHistoryDetailDialog = false
             selectedHistoryItem = null
         }
+        // Same gating as the result page, applied to the previewed item. The
+        // click path loads the item into the result-page state (exactly like
+        // tapping a thumbnail) and reuses the regular upscale/ultrafix flows.
+        val detailItem = selectedHistoryItem
+        val detailIdle = !isRunning && !isUpscaling && !isUltrafixPreparing
+        val detailCanUpscale = historyBitmap != null && detailItem != null &&
+            detailIdle && model?.runOnCpu == false &&
+            maxOf(detailItem.params.width, detailItem.params.height) <= 1024
+        val detailCanUltrafix = historyBitmap != null && detailItem != null &&
+            detailIdle && useImg2img && model?.isSdxl == true && cfg == 1f &&
+            maxOf(detailItem.params.width, detailItem.params.height) > 1024 &&
+            minOf(detailItem.params.width, detailItem.params.height) >=
+            maxOf(currentWidth, currentHeight, 512)
+        val loadDetailIntoResult = fun(): Boolean {
+            val bmp = historyBitmap ?: return false
+            val item = detailItem ?: return false
+            currentBitmap = bmp
+            generationParams = item.params
+            generationParamsModelId = item.modelId
+            currentDisplayedHistoryId = item.id
+            imageVersion++
+            dismissDetail()
+            return true
+        }
         ZoomableImageOverlay(
             bitmap = historyBitmap,
             onDismiss = dismissDetail,
@@ -2736,6 +2780,47 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         }
                     },
                 )
+                OverlayIconButton(
+                    icon = if (detailItem?.favorite == true) {
+                        Icons.Default.Favorite
+                    } else {
+                        Icons.Default.FavoriteBorder
+                    },
+                    contentDescription = "toggle favorite",
+                    onClick = {
+                        val item = selectedHistoryItem
+                        if (item != null) {
+                            // Keep the dialog's own copy in sync; the grid
+                            // refreshes through the observed flow.
+                            selectedHistoryItem = item.copy(favorite = !item.favorite)
+                            scope.launch(Dispatchers.IO) {
+                                historyManager.setFavorite(item.id, !item.favorite)
+                            }
+                        }
+                    },
+                )
+                if (detailCanUpscale) {
+                    OverlayIconButton(
+                        icon = Icons.Default.AutoFixHigh,
+                        contentDescription = "upscale image",
+                        onClick = {
+                            if (loadDetailIntoResult()) {
+                                showUpscalerDialog = true
+                            }
+                        },
+                    )
+                }
+                if (detailCanUltrafix) {
+                    OverlayIconButton(
+                        icon = Icons.Default.AutoAwesome,
+                        contentDescription = "ultrafix image",
+                        onClick = {
+                            if (loadDetailIntoResult()) {
+                                showUltrafixConfirmDialog = true
+                            }
+                        },
+                    )
+                }
                 OverlayIconButton(
                     icon = Icons.Default.Save,
                     contentDescription = "Save to gallery",

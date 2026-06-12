@@ -76,12 +76,6 @@ class PipelineSdxl : public PipelineQnn {
     return lowram_ ? !vae_encoder_path_.empty() : vae_encoder_ != nullptr;
   }
 
-  // Lowram loads/releases the VAE per vaeEncode/vaeDecode call, which the
-  // ultrafix tile loops would turn into one full model reload per tile.
-  bool supportsUltrafix() const override {
-    return !lowram_ && Pipeline::supportsUltrafix();
-  }
-
  protected:
   // Per-stage decode previews would force a VAE decoder load/release per
   // step in lowram mode; disable them there.
@@ -109,6 +103,11 @@ class PipelineSdxl : public PipelineQnn {
     if (lowram_) releaseClips();
   }
 
+  // Lowram model lifetimes are stage-scoped, not call-scoped: a stage model
+  // loads on first use and is released only when the next stage needs the
+  // memory (or by releaseTransientModels on exit). Tiled ultrafix passes
+  // call vaeEncode/vaeDecode/runUnetStep dozens of times per stage, so a
+  // per-call load/release would reload a multi-GB model once per tile.
   void vaeEncode(const GenerationRequest &, const float *image, float *mean,
                  float *std_dev) override {
     if (lowram_) loadVaeEncoderIfNeeded();
@@ -116,11 +115,12 @@ class PipelineSdxl : public PipelineQnn {
     if (StatusCode::SUCCESS != vae_encoder_->executeVaeEncoderGraphsSDXL(
                                    const_cast<float *>(image), mean, std_dev))
       throw std::runtime_error("QNN VAE enc SDXL exec failed");
-    if (lowram_) releaseVaeEncoder();
   }
 
   void beginDenoise(const GenerationRequest &) override {
     if (!lowram_ || unet_) return;
+    // The encode stage is over once the UNet is needed; never hold both.
+    releaseVaeEncoder();
     unet_ = qnn_runtime::createAndInitModel(unet_path_, "unet");
     QNN_INFO("[lowram] SDXL UNET loaded");
   }
@@ -164,10 +164,8 @@ class PipelineSdxl : public PipelineQnn {
     if (StatusCode::SUCCESS != vae_decoder_->executeVaeDecoderGraphsSDXL(
                                    const_cast<float *>(latents), pixels))
       throw std::runtime_error("QNN VAE dec SDXL exec failed");
-    if (lowram_) {
-      vae_decoder_.reset();
-      QNN_INFO("[lowram] SDXL VAE Decoder released");
-    }
+    // Lowram: stays loaded for the rest of the decode stage; released by
+    // releaseTransientModels when generate() exits.
   }
 
   // Catch-all for lowram: release whatever stage model is still loaded when

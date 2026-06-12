@@ -23,6 +23,7 @@ data class HistoryItem(
     val timestamp: Long,
     val mode: GenerationMode,
     val upscalerId: String?,
+    val favorite: Boolean = false,
 ) {
     companion object {
         fun fromEntity(filesDir: File, e: HistoryEntity): HistoryItem {
@@ -35,6 +36,7 @@ data class HistoryItem(
                 timestamp = e.timestamp,
                 mode = mode,
                 upscalerId = e.upscalerId,
+                favorite = e.favorite,
                 params = GenerationParameters(
                     steps = e.steps,
                     cfg = e.cfg,
@@ -124,6 +126,15 @@ class HistoryManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("HistoryManager", "Failed to save image", e)
             null
+        }
+    }
+
+    suspend fun setFavorite(id: Long, favorite: Boolean): Boolean = withContext(Dispatchers.IO) {
+        try {
+            dao.setFavorite(id, favorite) > 0
+        } catch (e: Exception) {
+            Log.e("HistoryManager", "Failed to update favorite", e)
+            false
         }
     }
 

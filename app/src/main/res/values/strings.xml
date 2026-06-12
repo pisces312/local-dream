@@ -101,7 +101,7 @@
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">No Models</string>
     <string name="no_npu_models">No Models</string>
-    <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems. Turning it off also disables SDXL aspect ratio.</string>
+    <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems. Turning it off also disables SDXL aspect ratio and UltraFix.</string>
     <string name="show_process">Show Generation Process</string>
     <string name="show_process_hint">Only works for NPU models. Show intermediate generation steps. This will slow down generation speed. Enable only when curious about the process.</string>
     <string name="preview_stride">Preview Stride</string>
@@ -305,10 +305,9 @@
 
     <!-- UltraFix -->
     <string name="ultrafix">UltraFix</string>
-    <string name="ultrafix_confirm_hint">UltraFix will refine this image with tiled img2img using the parameters below. A lower denoise strength (0.3-0.5) is recommended. Processing takes a long time; do not use this while the device is hot. To adjust the parameters, edit them on the prompt page first.</string>
+    <string name="ultrafix_confirm_hint">UltraFix will refine this image with tiled img2img using the parameters below. A denoise strength of 0.5 or lower is recommended. Processing takes a long time; do not use this while the device is hot. To adjust the parameters, edit them on the prompt page first.</string>
     <string name="ultrafix_params">Image: %1$dx%2$d\nTile: %3$dpx\nSteps: %4$d\nCFG: %5$s\nDenoise strength: %6$s\nScheduler: %7$s\nSeed: %8$s</string>
     <string name="ultrafix_seed_random">Random</string>
-    <string name="ultrafix_square_required">UltraFix requires a square generation size (e.g. 512x512). Please switch the resolution in Advanced Settings first.</string>
     <string name="ultrafix_preparing">Preparing UltraFix…</string>
     <string name="ultrafix_failed">UltraFix failed: %s</string>
     <string name="download_model_first">Please download the model first</string>
@@ -363,6 +362,8 @@
     <string name="history_filter_current_model_only">Current model only</string>
     <string name="history_filter_all_models">All models</string>
     <string name="history_filter_all">All</string>
+    <string name="history_filter_favorites">Favorites</string>
+    <string name="history_filter_favorites_only">Only favorites</string>
     <string name="history_filter_modes">Modes</string>
     <string name="history_filter_time_range">Time range</string>
     <string name="history_filter_time_any">Any time</string>
