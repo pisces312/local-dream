@@ -1,6 +1,7 @@
 #ifndef TILING_HPP
 #define TILING_HPP
 
+#include <algorithm>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -143,13 +144,28 @@ calculate_vae_tile_positions(int pixel_width, int pixel_height,
 }
 
 // Row-major (x, y) tile grid over a latent plane plus the per-axis overlap
-// actually realized by the even spread. Used for tiled UNet steps where the
-// graph runs at a fixed latent tile size.
+// of the first tile pair. Used for tiled UNet steps where the graph runs at
+// a fixed latent tile size.
+//
+// Positions are snapped down to multiples of `align`, the UNet's internal
+// downsampling factor: neighbouring tiles then see the overlap content at
+// the same feature-grid phase. With unaligned strides (e.g. a 3072px-wide
+// SDXL image spreads to strides 86/85) the two tiles' noise predictions are
+// systematically phase-shifted against each other and their blend ghosts.
+// The first/last positions stay clamped to the edges so coverage never
+// depends on the dimension itself being aligned.
 inline std::tuple<std::vector<std::pair<int, int>>, int, int>
 calculate_latent_tile_grid(int latent_w, int latent_h, int tile_size,
-                           int min_overlap) {
-  auto xs = calculate_tile_positions(latent_w, tile_size, min_overlap);
-  auto ys = calculate_tile_positions(latent_h, tile_size, min_overlap);
+                           int min_overlap, int align) {
+  auto aligned_positions = [&](int dimension) {
+    auto coords = calculate_tile_positions(dimension, tile_size, min_overlap);
+    for (auto &c : coords) c -= c % align;
+    coords.back() = dimension <= tile_size ? 0 : dimension - tile_size;
+    coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
+    return coords;
+  };
+  auto xs = aligned_positions(latent_w);
+  auto ys = aligned_positions(latent_h);
   std::vector<std::pair<int, int>> positions;
   positions.reserve(xs.size() * ys.size());
   for (int y : ys) {

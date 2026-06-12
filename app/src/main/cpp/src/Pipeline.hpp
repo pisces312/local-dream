@@ -581,9 +581,12 @@ inline xt::xarray<float> Pipeline::runUnetTiled(
   const int full_w = sample_width;
   const int full_h = sample_height;
   const int min_overlap = tile_lat / 4;
+  // The UNet downsamples its latent input by 8x internally (SD1.5; SDXL
+  // uses 4x, which 8 also satisfies); tile origins must stay on that grid.
+  const int grid_align = 8;
 
-  auto [positions, overlap_x, overlap_y] =
-      calculate_latent_tile_grid(full_w, full_h, tile_lat, min_overlap);
+  auto [positions, overlap_x, overlap_y] = calculate_latent_tile_grid(
+      full_w, full_h, tile_lat, min_overlap, grid_align);
 
   const int single_size = 4 * tile_lat * tile_lat;
   std::vector<float> tile_in(2 * single_size);
