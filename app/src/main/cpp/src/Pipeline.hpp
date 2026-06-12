@@ -2,7 +2,9 @@
 #define PIPELINE_HPP
 
 #include <MNN/Interpreter.hpp>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -245,6 +247,11 @@ class Pipeline {
                                  const xt::xarray<float> &latents_scaled,
                                  int timestep, bool skip_uncond,
                                  Conditioning &cond);
+  xt::xarray<float> ultrafixInvertNoise(const GenerationRequest &req,
+                                        const xt::xarray<float> &z0,
+                                        const xt::xarray<float> &timesteps,
+                                        int start_step, Conditioning &cond,
+                                        const std::function<void()> &on_hop);
 
   bool useTiledVae(const GenerationRequest &req) const {
     return vaeTilingSupported() &&
@@ -607,6 +614,28 @@ inline xt::xarray<float> Pipeline::runUnetTiled(
     std::copy(lat_tile.begin(), lat_tile.end(), tile_in.begin());
     std::copy(lat_tile.begin(), lat_tile.end(), tile_in.begin() + single_size);
 
+    // SDXL micro-conditioning: tell the model this tile is a crop of a
+    // larger image instead of a complete composition; otherwise every tile
+    // tends to restage the full prompt subject locally.
+    //
+    // The quantized UNet's time_ids input saturates at its 1024 calibration
+    // ceiling, so absolute full-image coordinates (4096...) are useless.
+    // Express original_size and the crop origin in a frame scaled so the
+    // image's long edge is 1024 (relative tile position is the signal that
+    // matters); target_size is the real 1024 render size.
+    if (sdxl_ && !cond.time_ids.empty()) {
+      const float cond_scale = 1024.0f / (float)std::max(req.width, req.height);
+      for (int b = 0; b < 2; ++b) {
+        float *tid = cond.time_ids.data() + b * 6;
+        tid[0] = std::round((float)req.height * cond_scale);
+        tid[1] = std::round((float)req.width * cond_scale);
+        tid[2] = std::round((float)(y * 8) * cond_scale);  // crop_top
+        tid[3] = std::round((float)(x * 8) * cond_scale);  // crop_left
+        tid[4] = (float)tile_px;                           // target_size h
+        tid[5] = (float)tile_px;                           // target_size w
+      }
+    }
+
     runUnetStep(req, tile_in.data(), timestep, skip_uncond, cond,
                 tile_out.data());
 
@@ -628,6 +657,102 @@ inline xt::xarray<float> Pipeline::runUnetTiled(
 
   return blend_output_tiles(pred_tiles, positions, full_h, full_w, tile_lat,
                             overlap_x, overlap_y);
+}
+
+// Cumulative alpha-bar table of the training noise schedule shared by every
+// scheduler we construct (scaled_linear, 0.00085 -> 0.012, 1000 steps).
+inline const std::vector<float> &trainAlphasCumprod() {
+  static const std::vector<float> table = [] {
+    std::vector<float> v(1000);
+    const double s0 = std::sqrt(0.00085);
+    const double s1 = std::sqrt(0.012);
+    double prod = 1.0;
+    for (int i = 0; i < 1000; ++i) {
+      double b = s0 + (s1 - s0) * i / 999.0;
+      prod *= 1.0 - b * b;
+      v[i] = (float)prod;
+    }
+    return v;
+  }();
+  return table;
+}
+
+// Inversion ladder: reverse-schedule timestep indices the DDIM inversion
+// walks, from low noise up to the img2img start step, coarsened by the
+// stride below. Stride 1 is exact step-for-step inversion - best structure
+// fidelity at one guidance-free tiled UNet round per hop; stride 2 halves
+// that cost for a small accuracy loss. PixelRush's single jump straight to
+// the start step ("one-step inversion") tested visibly worse here: an
+// epsilon estimated once on the clean input is too crude for the whole
+// lift unless the model was distilled specifically for such jumps (pure
+// SDXL-Turbo); DMD2-merged checkpoints keep enough of the base model's
+// behaviour that intermediate hops still pay off.
+inline std::vector<int> ultrafixInversionLadder(int num_timesteps,
+                                                int start_step) {
+  constexpr int kInversionStride = 1;
+  std::vector<int> ladder;
+  for (int j = num_timesteps - 1; j > start_step; j -= kInversionStride) {
+    ladder.push_back(j);
+  }
+  ladder.push_back(start_step);
+  return ladder;
+}
+
+// PixelRush-style partial inversion: instead of perturbing the base latent
+// with random noise (which discards its structure and lets every tile
+// re-decide the composition - the cause of repeated prompt subjects), DDIM-
+// invert the clean latent deterministically up the reverse ladder to the
+// start step. The inverted "noise" carries the image's own low frequencies,
+// so the reverse pass spends its capacity on high-frequency detail.
+//
+// Runs tiled (same grid/crop-conditioning as the reverse pass) and without
+// CFG (guidance-free inversion is the standard, stable choice; the cfg > 1
+// reverse then injects the prompt-aligned detail). Returns the result
+// expressed as an equivalent epsilon against the clean latent, so the
+// scheduler's own add_noise reproduces the inverted state exactly in
+// whatever latent convention (VP or sigma-style) it uses.
+inline xt::xarray<float> Pipeline::ultrafixInvertNoise(
+    const GenerationRequest &req, const xt::xarray<float> &z0,
+    const xt::xarray<float> &timesteps, int start_step, Conditioning &cond,
+    const std::function<void()> &on_hop) {
+  const auto &abar = trainAlphasCumprod();
+  const auto ladder =
+      ultrafixInversionLadder((int)timesteps.size(), start_step);
+
+  xt::xarray<float> z = z0;
+  float abar_src = 1.0f;
+  for (size_t k = 0; k < ladder.size(); ++k) {
+    const int t_tgt = std::clamp((int)timesteps(ladder[k]), 0, 999);
+    // DDIM inversion evaluates the model at the source's noise level; the
+    // first hop starts from the clean latent and uses the ladder's lowest
+    // timestep as the closest in-range evaluation point.
+    const int t_eval =
+        k == 0 ? t_tgt : std::clamp((int)timesteps(ladder[k - 1]), 0, 999);
+
+    xt::xarray<float> model_out =
+        runUnetTiled(req, z, t_eval, /*skip_uncond=*/true, cond);
+    xt::xarray<float> eps;
+    if (use_v_pred_) {
+      // v-prediction: eps = sqrt(abar)*v + sqrt(1-abar)*z at the source.
+      eps = xt::eval(std::sqrt(abar_src) * model_out +
+                     std::sqrt(1.0f - abar_src) * z);
+    } else {
+      eps = std::move(model_out);
+    }
+
+    const float abar_tgt = abar[t_tgt];
+    // Eq. 3: reconstruct x0 at the source level, re-noise to the target.
+    xt::xarray<float> x0_pred =
+        xt::eval((z - std::sqrt(1.0f - abar_src) * eps) / std::sqrt(abar_src));
+    z = xt::eval(std::sqrt(abar_tgt) * x0_pred +
+                 std::sqrt(1.0f - abar_tgt) * eps);
+    abar_src = abar_tgt;
+
+    if (on_hop) on_hop();
+  }
+
+  // Equivalent epsilon: z_K = sqrt(abar_K)*z0 + sqrt(1-abar_K)*eps_equiv.
+  return xt::eval((z - std::sqrt(abar_src) * z0) / std::sqrt(1.0f - abar_src));
 }
 
 // Decodes the current latents to a base64 RGB preview, cropped the same way
@@ -761,6 +886,26 @@ inline GenerationResult Pipeline::generate(
         pure_noise_latents = xt::eval(latents);
       }
 
+      // Ultrafix (PixelRush-style partial inversion): swap the random
+      // q-sample noise for the DDIM-inverted noise of the base latent. The
+      // structure then lives in the noise itself instead of being partially
+      // destroyed by it, which is what stops tiles from re-staging the
+      // prompt subject. Inversion hops are counted into the progress total
+      // (they cost one guidance-free tiled UNet round each).
+      if (req.ultrafix) {
+        auto inv_start = std::chrono::high_resolution_clock::now();
+        total_run_steps +=
+            (int)ultrafixInversionLadder((int)timesteps.size(), start_step)
+                .size();
+        latents_noise = ultrafixInvertNoise(
+            req, original_latents, timesteps, start_step, cond, [&]() {
+              current_step++;
+              progress_callback(current_step, total_run_steps, "");
+            });
+        std::cout << "Ultrafix inversion dur: " << elapsedMs(inv_start)
+                  << "ms\n";
+      }
+
       latents = scheduler->add_noise(original_latents, latents_noise, t);
 
       if (req.has_mask) {
@@ -860,7 +1005,67 @@ inline GenerationResult Pipeline::generate(
       if (i == start_step) first_step_time_ms = (int)step_dur;
       std::cout << "UNET step " << i << " dur: " << step_dur << "ms\n";
 
+      // Ultrafix noise injection (PixelRush Eq. 4): slerp a small fresh
+      // Gaussian component into the predicted noise. The deterministic
+      // inversion + deterministic reverse pair is nearly reconstructive
+      // (especially at cfg = 1 with few-step models), which over-smooths;
+      // 5% spherical randomness flattens the output distribution and
+      // restores high-frequency detail. Slerp (not lerp) keeps the noise
+      // norm on the Gaussian shell the scheduler expects. The paper warns
+      // this accumulates error over long multi-step runs - intended for
+      // few-step (distilled) ultrafix use.
+      if (req.ultrafix) {
+        const float kInjectionLambda = 0.95f;  // weight on the prediction
+        xt::xarray<float> rand_noise = xt::random::randn<float>(shape);
+        const float *a = noise_pred.data();
+        const float *b = rand_noise.data();
+        double dot = 0.0, norm_a = 0.0, norm_b = 0.0;
+        const size_t count = noise_pred.size();
+        for (size_t k = 0; k < count; ++k) {
+          dot += (double)a[k] * b[k];
+          norm_a += (double)a[k] * a[k];
+          norm_b += (double)b[k] * b[k];
+        }
+        const double denom = std::sqrt(norm_a) * std::sqrt(norm_b);
+        if (denom > 0.0) {
+          const double cos_omega = std::clamp(dot / denom, -0.999999, 0.999999);
+          const double omega = std::acos(cos_omega);
+          const double sin_omega = std::sin(omega);
+          const float w_pred =
+              (float)(std::sin(kInjectionLambda * omega) / sin_omega);
+          const float w_rand =
+              (float)(std::sin((1.0 - kInjectionLambda) * omega) / sin_omega);
+          noise_pred = xt::eval(w_pred * noise_pred + w_rand * rand_noise);
+        }
+      }
+
       latents = scheduler->step(noise_pred, timesteps(i), latents).prev_sample;
+
+      // Ultrafix skip-residual anchor: over the structural (early) portion
+      // of the remaining steps, blend the renoised original latent back in
+      // with a cosine-decaying weight. Composition is decided at high noise,
+      // so this pins the global structure to the base image (tiles cannot
+      // grow new prompt subjects) while the low-noise detail steps run
+      // unconstrained. Same idea as the per-step inpaint blend below, with
+      // the spatial mask replaced by a time-decaying scalar.
+      // if (req.ultrafix && i + 1 < (int)timesteps.size()) {
+      //   const float kAnchorFrac = 0.5f;  // anchored share of remaining steps
+      //   int anchor_steps =
+      //       (int)(((int)timesteps.size() - start_step) * kAnchorFrac);
+      //   int steps_done = i - start_step + 1;
+      //   if (steps_done < anchor_steps) {
+      //     float progress = (float)steps_done / (float)anchor_steps;
+      //     float cos_half = std::cos(progress * 1.5707963f);  // pi/2
+      //     float anchor_weight = cos_half * cos_half;
+      //     // The scheduler step above moved `latents` to the next timestep's
+      //     // noise level; renoise the original to that same level.
+      //     xt::xarray<int> t_next = {(int)(timesteps(i + 1))};
+      //     xt::xarray<float> orig_noised =
+      //         scheduler->add_noise(original_latents, latents_noise, t_next);
+      //     latents = xt::eval(anchor_weight * orig_noised +
+      //                        (1.0f - anchor_weight) * latents);
+      //   }
+      // }
 
       if (req.has_mask) {
         xt::xarray<int> t_xt = {(int)(timesteps(i))};
