@@ -83,17 +83,32 @@ fun ZoomableImageOverlay(
                     offsetY += pan.y
                 }
             }
-            .pointerInput(Unit) {
+            .pointerInput(bitmap) {
                 detectTapGestures(onTap = { offset ->
+                    val bmp = bitmap
+                    if (bmp == null) {
+                        onDismiss()
+                        return@detectTapGestures
+                    }
                     val centerX = size.width / 2f
                     val centerY = size.height / 2f
-                    val imageSize = minOf(size.width, size.height).toFloat()
-                    val scaledImageSize = imageSize * scale
+                    // The image is laid out as a centered square of this side,
+                    // then ContentScale.Fit letterboxes the bitmap inside it by
+                    // its aspect ratio, then graphicsLayer scales about the
+                    // center and translates. Reproduce that to get the actual
+                    // visible image rect so taps in the letterbox (a non-square
+                    // image) dismiss too, not only taps outside the square.
+                    val square = minOf(size.width, size.height).toFloat()
+                    val aspect = bmp.width.toFloat() / bmp.height.toFloat()
+                    val baseWidth = if (aspect >= 1f) square else square * aspect
+                    val baseHeight = if (aspect >= 1f) square / aspect else square
+                    val scaledWidth = baseWidth * scale
+                    val scaledHeight = baseHeight * scale
 
-                    val left = centerX - scaledImageSize / 2f + offsetX
-                    val top = centerY - scaledImageSize / 2f + offsetY
-                    val right = left + scaledImageSize
-                    val bottom = top + scaledImageSize
+                    val left = centerX + offsetX - scaledWidth / 2f
+                    val right = centerX + offsetX + scaledWidth / 2f
+                    val top = centerY + offsetY - scaledHeight / 2f
+                    val bottom = centerY + offsetY + scaledHeight / 2f
 
                     if (offset.x < left ||
                         offset.x > right ||
