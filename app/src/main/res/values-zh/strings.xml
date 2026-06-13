@@ -73,6 +73,7 @@
     <string name="about_app">须知</string>
     <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n支持在 Hexagon V68 架构及以上的骁龙 NPU 上运行 SD1.5 模型。\n\n支持在骁龙 8 Gen 3 及更新的设备上运行 SDXL 模型。\n\n若您的芯片不在上述范围内，则只能使用 CPU/GPU 运行。\n\n本项目在 https://github.com/xororz/local-dream 开源，可以在github上查看源代码或提交问题\n\n文档：https://ld.chino.icu</string>
     <string name="help">帮助</string>
+    <string name="more_options">更多</string>
 
     <!-- Model List Screen -->
     <string name="available_models">可用模型</string>
@@ -345,6 +346,26 @@
     <string name="migration_skip">跳过</string>
     <string name="migration_skip_warning">跳过后旧的历史记录将无法在新的历史浏览中查看。</string>
 
+    <!-- History backup -->
+    <string name="backup_restore">数据备份与恢复</string>
+    <string name="backup_hint">将生成历史(图片与参数)导出为 zip 文件,或导入备份与当前历史合并,重复记录会自动跳过。</string>
+    <string name="backup_stats_all">全部: %1$d 张图片 (%2$s)</string>
+    <string name="backup_stats_favorites">收藏: %1$d 张图片 (%2$s)</string>
+    <string name="backup_scope_all">全部</string>
+    <string name="backup_scope_favorites">仅收藏</string>
+    <string name="backup_export">导出</string>
+    <string name="backup_import">导入</string>
+    <string name="backup_preparing">正在准备…</string>
+    <string name="backup_exporting">正在导出 %1$d / %2$d</string>
+    <string name="backup_importing">正在导入 %1$d / %2$d</string>
+    <string name="backup_export_done">已导出 %1$d 张图片</string>
+    <string name="backup_import_done">已导入 %1$d 条,跳过重复 %2$d 条,失败 %3$d 条</string>
+    <string name="backup_import_orphan_note">备份中有 %1$d 个模型未安装,这些记录已导入,可在历史筛选中选择全部模型查看。</string>
+    <string name="backup_failed">操作失败: %1$s</string>
+    <string name="backup_invalid_file">不是有效的 Local Dream 备份文件</string>
+    <string name="delete_keep_history">保留生成历史</string>
+    <string name="delete_keep_history_hint">删除模型后历史记录仍可在历史页查看</string>
+
     <!-- History filter -->
     <string name="history_filter_apply">应用</string>
     <string name="history_filter_reset">重置</string>
@@ -353,7 +374,8 @@
     <string name="history_filter_all_models">所有模型</string>
     <string name="history_filter_all">全部</string>
     <string name="history_filter_favorites">收藏</string>
-    <string name="history_filter_favorites_only">仅收藏</string>
+    <string name="history_filter_favorite">已收藏</string>
+    <string name="history_filter_not_favorite">未收藏</string>
     <string name="history_filter_modes">模式</string>
     <string name="history_filter_time_range">时间范围</string>
     <string name="history_filter_time_any">不限</string>

@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -41,7 +42,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
-import androidx.compose.material3.AppBarRow
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -63,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.LinkAnnotation
@@ -121,14 +122,50 @@ private fun getCleanFileName(uri: Uri): String {
 }
 
 @Composable
-private fun DeleteConfirmDialog(selectedCount: Int, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun DeleteConfirmDialog(
+    selectedCount: Int,
+    onConfirm: (keepHistory: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var keepHistory by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.delete_model)) },
-        text = { Text(stringResource(R.string.delete_confirm, selectedCount)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.delete_confirm, selectedCount))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = keepHistory,
+                            role = Role.Checkbox,
+                            onValueChange = { keepHistory = it },
+                        ),
+                ) {
+                    Checkbox(
+                        checked = keepHistory,
+                        onCheckedChange = null,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.delete_keep_history),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = stringResource(R.string.delete_keep_history_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
         confirmButton = {
             TextButton(
-                onClick = onConfirm,
+                onClick = { onConfirm(keepHistory) },
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.error,
                 ),
@@ -187,6 +224,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showFileManagerDialog by remember { mutableStateOf(false) }
+    var showBackupDialog by remember { mutableStateOf(false) }
     var showEmbeddingManagerDialog by remember { mutableStateOf(false) }
     var showCustomModelDialog by remember { mutableStateOf(false) }
     var showCustomNpuModelDialog by remember { mutableStateOf(false) }
@@ -372,6 +410,16 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
         if (showSettingsDialog) {
             tempBaseUrl = currentBaseUrl
         }
+    }
+
+    if (showBackupDialog) {
+        DataBackupDialog(
+            installedModelIds = modelRepository.models
+                .filter { it.isDownloaded }
+                .map { it.id }
+                .toSet(),
+            onDismiss = { showBackupDialog = false },
+        )
     }
 
     if (showFileManagerDialog) {
@@ -585,14 +633,14 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     if (showDeleteConfirm && selectedModels.isNotEmpty()) {
         DeleteConfirmDialog(
             selectedCount = selectedModels.size,
-            onConfirm = {
+            onConfirm = { keepHistory ->
                 showDeleteConfirm = false
                 isSelectionMode = false
 
                 scope.launch {
                     var successCount = 0
                     selectedModels.forEach { model ->
-                        if (model.deleteModel(context)) {
+                        if (model.deleteModel(context, keepHistory)) {
                             successCount++
                         }
                     }
@@ -728,32 +776,61 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             }
                         }
                     } else {
-                        val helpLabel = stringResource(R.string.help)
-                        val upscaleLabel = stringResource(R.string.image_upscale)
-                        val settingsLabel = stringResource(R.string.settings)
-                        AppBarRow {
-                            clickableItem(
-                                onClick = { showHelpDialog = true },
-                                icon = {
+                        // A single overflow menu keeps the collapsed large top
+                        // bar's title from being squeezed by multiple action
+                        // icons competing for width.
+                        var menuExpanded by remember { mutableStateOf(false) }
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.more_options),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.help)) },
+                                leadingIcon = {
                                     Icon(Icons.AutoMirrored.Filled.Help, contentDescription = null)
                                 },
-                                label = helpLabel,
+                                onClick = {
+                                    menuExpanded = false
+                                    showHelpDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.history_tab)) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.History, contentDescription = null)
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    navController.navigate(Screen.History.route)
+                                },
                             )
                             if (Model.isQualcommDevice()) {
-                                clickableItem(
-                                    onClick = { navController.navigate(Screen.Upscale.route) },
-                                    icon = {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.image_upscale)) },
+                                    leadingIcon = {
                                         Icon(Icons.Default.AutoFixHigh, contentDescription = null)
                                     },
-                                    label = upscaleLabel,
+                                    onClick = {
+                                        menuExpanded = false
+                                        navController.navigate(Screen.Upscale.route)
+                                    },
                                 )
                             }
-                            clickableItem(
-                                onClick = { showSettingsDialog = true },
-                                icon = {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.settings)) },
+                                leadingIcon = {
                                     Icon(Icons.Default.Settings, contentDescription = null)
                                 },
-                                label = settingsLabel,
+                                onClick = {
+                                    menuExpanded = false
+                                    showSettingsDialog = true
+                                },
                             )
                         }
                     }
@@ -1510,6 +1587,16 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
+
+                    // History backup and restore
+                    item {
+                        SettingNavCard(
+                            icon = Icons.Default.SettingsBackupRestore,
+                            label = stringResource(R.string.backup_restore),
+                            onClick = { showBackupDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
@@ -1598,7 +1685,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     }
 }
 
-private fun formatBytes(bytes: Long): String = when {
+internal fun formatBytes(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"

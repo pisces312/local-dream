@@ -73,6 +73,7 @@
     <string name="about_app">참고</string>
     <string name="must_read">이 앱은 CPU/GPU와 일부 Qualcomm NPU에서 Stable Diffusion 이미지 생성을 실행할 수 있습니다.\n\nSD1.5 모델은 Hexagon V68 아키텍처 이상의 Snapdragon NPU에서 지원됩니다.\n\nSDXL 모델은 Snapdragon 8 Gen 3 이상 기기에서 지원됩니다.\n\n사용 중인 칩이 위 범위에 해당하지 않으면 CPU/GPU에서만 실행할 수 있습니다.\n\n이 프로젝트는 https://github.com/xororz/local-dream 에서 오픈소스로 공개되어 있으며, 소스 코드를 확인하거나 이슈를 제출할 수 있습니다.\n\n문서: https://ld.chino.icu</string>
     <string name="help">도움말</string>
+    <string name="more_options">더보기</string>
 
     <!-- Model List Screen -->
     <string name="available_models">사용 가능한 모델</string>
@@ -345,6 +346,26 @@
     <string name="migration_skip">건너뛰기</string>
     <string name="migration_skip_warning">건너뛰면 기존 기록을 새 기록 화면에서 볼 수 없습니다.</string>
 
+    <!-- History backup -->
+    <string name="backup_restore">백업 및 복원</string>
+    <string name="backup_hint">생성 기록(이미지 및 매개변수)을 zip 파일로 내보내거나 백업을 가져와 현재 기록과 병합합니다. 중복 항목은 자동으로 건너뜁니다.</string>
+    <string name="backup_stats_all">전체: %1$d장 (%2$s)</string>
+    <string name="backup_stats_favorites">즐겨찾기: %1$d장 (%2$s)</string>
+    <string name="backup_scope_all">전체</string>
+    <string name="backup_scope_favorites">즐겨찾기만</string>
+    <string name="backup_export">내보내기</string>
+    <string name="backup_import">가져오기</string>
+    <string name="backup_preparing">준비 중…</string>
+    <string name="backup_exporting">내보내는 중 %1$d / %2$d</string>
+    <string name="backup_importing">가져오는 중 %1$d / %2$d</string>
+    <string name="backup_export_done">%1$d장을 내보냈습니다</string>
+    <string name="backup_import_done">%1$d개 가져옴, 중복 %2$d개 건너뜀, %3$d개 실패</string>
+    <string name="backup_import_orphan_note">백업에 설치되지 않은 모델 %1$d개가 있습니다. 해당 기록은 가져왔으며 기록 필터의 \'모든 모델\'에서 볼 수 있습니다.</string>
+    <string name="backup_failed">작업 실패: %1$s</string>
+    <string name="backup_invalid_file">유효한 Local Dream 백업 파일이 아닙니다</string>
+    <string name="delete_keep_history">생성 기록 유지</string>
+    <string name="delete_keep_history_hint">모델 삭제 후에도 기록 페이지에서 볼 수 있습니다</string>
+
     <!-- History filter -->
     <string name="history_filter_apply">적용</string>
     <string name="history_filter_reset">초기화</string>
@@ -353,7 +374,8 @@
     <string name="history_filter_all_models">모든 모델</string>
     <string name="history_filter_all">전체</string>
     <string name="history_filter_favorites">즐겨찾기</string>
-    <string name="history_filter_favorites_only">즐겨찾기만</string>
+    <string name="history_filter_favorite">즐겨찾기됨</string>
+    <string name="history_filter_not_favorite">즐겨찾기 안 함</string>
     <string name="history_filter_modes">모드</string>
     <string name="history_filter_time_range">기간</string>
     <string name="history_filter_time_any">전체 기간</string>

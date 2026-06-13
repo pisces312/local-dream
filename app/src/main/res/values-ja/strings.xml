@@ -68,6 +68,7 @@
     <string name="about_app">重要</string>
     <string name="must_read">このアプリは、CPU/GPU および一部の Qualcomm 製 NPU 上で Stable Diffusion による画像生成を実行できます。\n\nSD1.5 モデルは、Hexagon V68 アーキテクチャ以降の Snapdragon NPU で動作します。\n\nSDXL モデルは、Snapdragon 8 Gen 3 以降のデバイスで動作します。\n\n上記に該当しないチップでは、CPU/GPU のみでの実行となります。\n\nこのプロジェクトはオープンソースで、\nhttps://github.com/xororz/local-dream\nにてソースコードの閲覧や Issue の報告ができます。\n\nドキュメント：https://ld.chino.icu</string>
     <string name="help">ヘルプ</string>
+    <string name="more_options">その他</string>
     <string name="available_models">利用可能なモデル</string>
     <plurals name="selected_items">
         <item quantity="other">%d 選択</item>
@@ -315,6 +316,26 @@
     <string name="migration_skip">スキップ</string>
     <string name="migration_skip_warning">スキップすると、旧バージョンの履歴は新しい履歴ビューに表示されません。</string>
 
+    <!-- History backup -->
+    <string name="backup_restore">バックアップと復元</string>
+    <string name="backup_hint">生成履歴(画像とパラメータ)をzipファイルにエクスポート、またはバックアップをインポートして現在の履歴に統合します。重複は自動的にスキップされます。</string>
+    <string name="backup_stats_all">すべて: %1$d枚 (%2$s)</string>
+    <string name="backup_stats_favorites">お気に入り: %1$d枚 (%2$s)</string>
+    <string name="backup_scope_all">すべて</string>
+    <string name="backup_scope_favorites">お気に入りのみ</string>
+    <string name="backup_export">エクスポート</string>
+    <string name="backup_import">インポート</string>
+    <string name="backup_preparing">準備中…</string>
+    <string name="backup_exporting">エクスポート中 %1$d / %2$d</string>
+    <string name="backup_importing">インポート中 %1$d / %2$d</string>
+    <string name="backup_export_done">%1$d枚をエクスポートしました</string>
+    <string name="backup_import_done">%1$d件をインポート、重複%2$d件をスキップ、%3$d件失敗</string>
+    <string name="backup_import_orphan_note">バックアップ内の%1$d個のモデルは未インストールです。これらの記録はインポート済みで、履歴フィルターの「すべてのモデル」から閲覧できます。</string>
+    <string name="backup_failed">操作に失敗しました: %1$s</string>
+    <string name="backup_invalid_file">有効なLocal Dreamバックアップファイルではありません</string>
+    <string name="delete_keep_history">生成履歴を保持</string>
+    <string name="delete_keep_history_hint">モデル削除後も履歴は履歴ページで閲覧できます</string>
+
     <!-- History filter -->
     <string name="history_filter_apply">適用</string>
     <string name="history_filter_reset">リセット</string>
@@ -323,7 +344,8 @@
     <string name="history_filter_all_models">すべてのモデル</string>
     <string name="history_filter_all">すべて</string>
     <string name="history_filter_favorites">お気に入り</string>
-    <string name="history_filter_favorites_only">お気に入りのみ</string>
+    <string name="history_filter_favorite">お気に入り済み</string>
+    <string name="history_filter_not_favorite">未登録</string>
     <string name="history_filter_modes">モード</string>
     <string name="history_filter_time_range">期間</string>
     <string name="history_filter_time_any">指定なし</string>

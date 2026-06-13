@@ -35,6 +35,8 @@ fun GenerationParamsDialog(
     modelId: String,
     displayMode: GenerationMode? = null,
     showImg2imgButton: Boolean,
+    showShareButton: Boolean = true,
+    showReproduceButton: Boolean = true,
     onShare: () -> Unit,
     onSendToImg2img: () -> Unit,
     onReproduce: () -> Unit,
@@ -48,11 +50,13 @@ fun GenerationParamsDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(title, modifier = Modifier.weight(1f))
-                IconButton(onClick = onShare) {
-                    Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = stringResource(R.string.share),
-                    )
+                if (showShareButton) {
+                    IconButton(onClick = onShare) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = stringResource(R.string.share),
+                        )
+                    }
                 }
             }
         },
@@ -161,8 +165,10 @@ fun GenerationParamsDialog(
                     TextButton(onClick = onDismiss) {
                         Text(stringResource(R.string.close))
                     }
-                    TextButton(onClick = onReproduce) {
-                        Text(stringResource(R.string.reproduce))
+                    if (showReproduceButton) {
+                        TextButton(onClick = onReproduce) {
+                            Text(stringResource(R.string.reproduce))
+                        }
                     }
                 }
             }

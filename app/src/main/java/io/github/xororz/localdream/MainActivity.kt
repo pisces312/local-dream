@@ -25,6 +25,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.xororz.localdream.data.MigrationState
 import io.github.xororz.localdream.navigation.Screen
+import io.github.xororz.localdream.ui.screens.HistoryScreen
 import io.github.xororz.localdream.ui.screens.MigrationScreen
 import io.github.xororz.localdream.ui.screens.ModelListScreen
 import io.github.xororz.localdream.ui.screens.ModelRunScreen
@@ -191,6 +192,9 @@ private fun AppContent() {
         }
         composable(Screen.Upscale.route) {
             UpscaleScreen(navController)
+        }
+        composable(Screen.History.route) {
+            HistoryScreen(navController)
         }
     }
 }

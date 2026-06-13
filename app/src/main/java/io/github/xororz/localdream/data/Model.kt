@@ -143,13 +143,14 @@ data class Model(
         context.startForegroundService(intent)
     }
 
-    suspend fun deleteModel(context: Context): Boolean = withContext(Dispatchers.IO) {
+    suspend fun deleteModel(context: Context, keepHistory: Boolean = true): Boolean = withContext(Dispatchers.IO) {
         try {
             val modelDir = File(getModelsDir(context), id)
-            val historyManager = HistoryManager(context)
             val generationPreferences = GenerationPreferences(context)
 
-            historyManager.clearHistoryForModel(id)
+            if (!keepHistory) {
+                HistoryManager(context).clearHistoryForModel(id)
+            }
             generationPreferences.clearPreferencesForModel(id)
 
             if (modelDir.exists() && modelDir.isDirectory) {

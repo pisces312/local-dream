@@ -25,6 +25,8 @@ enum class GenerationMode {
 
 enum class DeviceFilter { NPU, CPU, GPU }
 
+enum class FavoriteFilter { FAVORITE, NOT_FAVORITE }
+
 @Immutable
 data class HistoryFilter(
     val modelIds: Set<String>? = null,
@@ -35,10 +37,29 @@ data class HistoryFilter(
     val schedulers: Set<String>? = null,
     val devices: Set<DeviceFilter>? = null,
     val promptSubstring: String? = null,
-    val favoritesOnly: Boolean = false,
+    val favorites: Set<FavoriteFilter>? = null,
     val descending: Boolean = true,
 ) {
-    fun toSqlQuery(): SupportSQLiteQuery {
+    // Full rows, newest/oldest first. Used by paged and one-shot list queries.
+    fun toSqlQuery(): SupportSQLiteQuery = buildQuery(projection = "*", ordered = true)
+
+    // Just the ids matching the filter, in display order. Used by select-all so
+    // the selection covers every match, not only the pages loaded in memory.
+    fun toIdQuery(): SupportSQLiteQuery = buildQuery(projection = "id", ordered = true)
+
+    // Row count matching the filter. Used to drive the select-all toggle and the
+    // selection counter without materializing the list.
+    fun toCountQuery(): SupportSQLiteQuery = buildQuery(projection = "COUNT(*)", ordered = false)
+
+    // Newest matches first, capped at [limit]. Backs the result-page thumbnail
+    // strip and the seed-on-open effect without loading the whole history.
+    fun toRecentQuery(limit: Int): SupportSQLiteQuery = buildQuery(projection = "*", ordered = true, limit = limit)
+
+    private fun buildQuery(
+        projection: String,
+        ordered: Boolean,
+        limit: Int? = null,
+    ): SupportSQLiteQuery {
         val where = mutableListOf<String>()
         val args = mutableListOf<Any>()
 
@@ -86,15 +107,23 @@ data class HistoryFilter(
             args += promptSubstring
             args += promptSubstring
         }
-        if (favoritesOnly) {
-            where += "favorite = 1"
+        if (!favorites.isNullOrEmpty()) {
+            val parts = mutableListOf<String>()
+            if (FavoriteFilter.FAVORITE in favorites) parts += "favorite = 1"
+            if (FavoriteFilter.NOT_FAVORITE in favorites) parts += "favorite = 0"
+            where += "(${parts.joinToString(" OR ")})"
         }
 
         val whereClause = if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
-        val direction = if (descending) "DESC" else "ASC"
-        val orderClause = "ORDER BY timestamp $direction, id $direction"
+        val orderClause = if (ordered) {
+            val direction = if (descending) "DESC" else "ASC"
+            "ORDER BY timestamp $direction, id $direction"
+        } else {
+            ""
+        }
+        val limitClause = if (limit != null) "LIMIT $limit" else ""
 
-        val sql = "SELECT * FROM generation_history $whereClause $orderClause"
+        val sql = "SELECT $projection FROM generation_history $whereClause $orderClause $limitClause"
 
         return SimpleSQLiteQuery(sql, args.toTypedArray())
     }

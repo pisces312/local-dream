@@ -4,6 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.runtime.Immutable
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.map
 import io.github.xororz.localdream.data.db.AppDatabase
 import io.github.xororz.localdream.data.db.HistoryEntity
 import io.github.xororz.localdream.ui.screens.GenerationParameters
@@ -151,6 +155,46 @@ class HistoryManager(private val context: Context) {
 
     fun observe(filter: HistoryFilter): Flow<List<HistoryItem>> = dao.query(filter.toSqlQuery()).map { entities ->
         entities.map { HistoryItem.fromEntity(filesDir, it) }
+    }
+
+    // Paged grid feed. pageSize 60 keeps roughly three screens of 2-column
+    // thumbnails resident; placeholders are off so the grid never renders empty
+    // slots (the list simply grows as pages load).
+    fun pager(filter: HistoryFilter): Flow<PagingData<HistoryItem>> = Pager(
+        config = PagingConfig(pageSize = 60, enablePlaceholders = false),
+        pagingSourceFactory = { dao.queryPaged(filter.toSqlQuery()) },
+    ).flow.map { data -> data.map { HistoryItem.fromEntity(filesDir, it) } }
+
+    fun observeCount(filter: HistoryFilter): Flow<Int> = dao.queryCount(filter.toCountQuery())
+
+    // Newest matches first, capped. Backs the result-page thumbnail strip.
+    fun observeRecent(filter: HistoryFilter, limit: Int): Flow<List<HistoryItem>> = dao.query(filter.toRecentQuery(limit)).map { entities ->
+        entities.map { HistoryItem.fromEntity(filesDir, it) }
+    }
+
+    fun observeFavorite(id: Long): Flow<Boolean?> = dao.observeFavorite(id)
+
+    // Every id matching the filter, in display order. Used by select-all.
+    suspend fun queryIds(filter: HistoryFilter): List<Long> = withContext(Dispatchers.IO) {
+        try {
+            dao.queryIds(filter.toIdQuery())
+        } catch (e: Exception) {
+            Log.e("HistoryManager", "Failed to query ids", e)
+            emptyList()
+        }
+    }
+
+    // Resolves a selection (ids) back to items for batch save/delete. Returned
+    // in the requested id order so callers can rely on it.
+    suspend fun getItems(ids: Collection<Long>): List<HistoryItem> = withContext(Dispatchers.IO) {
+        try {
+            val byId = dao.getByIds(ids.toList())
+                .associateBy { it.id }
+            ids.mapNotNull { byId[it]?.let { e -> HistoryItem.fromEntity(filesDir, e) } }
+        } catch (e: Exception) {
+            Log.e("HistoryManager", "Failed to load items", e)
+            emptyList()
+        }
     }
 
     fun observeKnownModelIds(): Flow<List<String>> = dao.observeKnownModelIds()

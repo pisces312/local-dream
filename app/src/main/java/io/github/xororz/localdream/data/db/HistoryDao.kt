@@ -1,5 +1,6 @@
 package io.github.xororz.localdream.data.db
 
+import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -28,8 +29,23 @@ interface HistoryDao {
     @RawQuery(observedEntities = [HistoryEntity::class])
     fun query(q: SupportSQLiteQuery): Flow<List<HistoryEntity>>
 
+    @RawQuery(observedEntities = [HistoryEntity::class])
+    fun queryPaged(q: SupportSQLiteQuery): PagingSource<Int, HistoryEntity>
+
+    @RawQuery(observedEntities = [HistoryEntity::class])
+    fun queryCount(q: SupportSQLiteQuery): Flow<Int>
+
     @RawQuery
     suspend fun queryOnce(q: SupportSQLiteQuery): List<HistoryEntity>
+
+    @RawQuery
+    suspend fun queryIds(q: SupportSQLiteQuery): List<Long>
+
+    @Query("SELECT * FROM generation_history WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<Long>): List<HistoryEntity>
+
+    @Query("SELECT favorite FROM generation_history WHERE id = :id")
+    fun observeFavorite(id: Long): Flow<Boolean?>
 
     @Query("SELECT COUNT(*) FROM generation_history WHERE modelId = :modelId AND timestamp = :timestamp")
     suspend fun countByKey(modelId: String, timestamp: Long): Int

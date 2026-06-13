@@ -75,6 +75,7 @@
     <string name="about_app">Note</string>
     <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nSD1.5 models are supported on Snapdragon NPUs with Hexagon V68 architecture or newer.\n\nSDXL models are supported on Snapdragon 8 Gen 3 and newer devices.\n\nIf your chip is outside the above scope, you can only run on CPU/GPU.\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues\n\nDocumentation: https://ld.chino.icu</string>
     <string name="help">Help</string>
+    <string name="more_options">More</string>
 
     <!-- Model List Screen -->
     <string name="available_models">Available Models</string>
@@ -355,6 +356,26 @@
     <string name="migration_skip">Skip</string>
     <string name="migration_skip_warning">Skipping will leave old history records unavailable in the new history view.</string>
 
+    <!-- History backup -->
+    <string name="backup_restore">Backup &amp; Restore</string>
+    <string name="backup_hint">Export your generation history (images and parameters) to a zip file, or import a backup to merge it into the current history. Duplicates are skipped automatically.</string>
+    <string name="backup_stats_all">All: %1$d images (%2$s)</string>
+    <string name="backup_stats_favorites">Favorites: %1$d images (%2$s)</string>
+    <string name="backup_scope_all">All</string>
+    <string name="backup_scope_favorites">Favorites only</string>
+    <string name="backup_export">Export</string>
+    <string name="backup_import">Import</string>
+    <string name="backup_preparing">Preparing…</string>
+    <string name="backup_exporting">Exporting %1$d / %2$d</string>
+    <string name="backup_importing">Importing %1$d / %2$d</string>
+    <string name="backup_export_done">Exported %1$d images</string>
+    <string name="backup_import_done">Imported %1$d, skipped %2$d duplicates, %3$d failed</string>
+    <string name="backup_import_orphan_note">%1$d models in this backup are not installed. Their records were imported and can be viewed via the history filter (All models).</string>
+    <string name="backup_failed">Operation failed: %1$s</string>
+    <string name="backup_invalid_file">Not a valid Local Dream backup file</string>
+    <string name="delete_keep_history">Keep generation history</string>
+    <string name="delete_keep_history_hint">History stays viewable in the history page after the model is deleted</string>
+
     <!-- History filter -->
     <string name="history_filter_apply">Apply</string>
     <string name="history_filter_reset">Reset</string>
@@ -363,7 +384,8 @@
     <string name="history_filter_all_models">All models</string>
     <string name="history_filter_all">All</string>
     <string name="history_filter_favorites">Favorites</string>
-    <string name="history_filter_favorites_only">Only favorites</string>
+    <string name="history_filter_favorite">Favorited</string>
+    <string name="history_filter_not_favorite">Not favorited</string>
     <string name="history_filter_modes">Modes</string>
     <string name="history_filter_time_range">Time range</string>
     <string name="history_filter_time_any">Any time</string>

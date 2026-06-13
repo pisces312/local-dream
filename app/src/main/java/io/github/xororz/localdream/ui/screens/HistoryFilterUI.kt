@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DeviceFilter
+import io.github.xororz.localdream.data.FavoriteFilter
 import io.github.xororz.localdream.data.GenerationMode
 import io.github.xororz.localdream.data.HistoryFilter
 import io.github.xororz.localdream.utils.schedulerDisplayName
@@ -74,7 +75,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HistoryFilterBar(
     filter: HistoryFilter,
-    currentModelId: String,
+    currentModelId: String?,
     onShowFilterSheet: () -> Unit,
     onSetCurrentModelOnly: () -> Unit,
     onSetAllModels: () -> Unit,
@@ -88,26 +89,30 @@ fun HistoryFilterBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val isCurrentOnly = filter.modelIds == setOf(currentModelId)
-            val isAllModels = filter.modelIds == null
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(
-                    ButtonGroupDefaults.ConnectedSpaceBetween,
-                ),
-            ) {
-                ToggleButton(
-                    checked = isCurrentOnly,
-                    onCheckedChange = { checked -> if (checked) onSetCurrentModelOnly() },
-                    shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
+            // The current/all shortcut only makes sense inside a model run
+            // screen; the global history screen scopes models via the sheet.
+            if (currentModelId != null) {
+                val isCurrentOnly = filter.modelIds == setOf(currentModelId)
+                val isAllModels = filter.modelIds == null
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(
+                        ButtonGroupDefaults.ConnectedSpaceBetween,
+                    ),
                 ) {
-                    Text(stringResource(R.string.history_filter_current_model_only))
-                }
-                ToggleButton(
-                    checked = isAllModels,
-                    onCheckedChange = { checked -> if (checked) onSetAllModels() },
-                    shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                ) {
-                    Text(stringResource(R.string.history_filter_all_models))
+                    ToggleButton(
+                        checked = isCurrentOnly,
+                        onCheckedChange = { checked -> if (checked) onSetCurrentModelOnly() },
+                        shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
+                    ) {
+                        Text(stringResource(R.string.history_filter_current_model_only))
+                    }
+                    ToggleButton(
+                        checked = isAllModels,
+                        onCheckedChange = { checked -> if (checked) onSetAllModels() },
+                        shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                    ) {
+                        Text(stringResource(R.string.history_filter_all_models))
+                    }
                 }
             }
             val advanced = filter.hasAdvancedFilters()
@@ -146,14 +151,14 @@ fun HistoryFilterBar(
     }
 }
 
-private fun HistoryFilter.hasAdvancedFilters(): Boolean = modes != null ||
+internal fun HistoryFilter.hasAdvancedFilters(): Boolean = modes != null ||
     from != null ||
     to != null ||
     sizes != null ||
     schedulers != null ||
     devices != null ||
     !promptSubstring.isNullOrBlank() ||
-    favoritesOnly ||
+    !favorites.isNullOrEmpty() ||
     !descending
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -214,13 +219,24 @@ fun HistoryFilterSheet(
 
             Section(stringResource(R.string.history_filter_favorites)) {
                 ChipRow {
-                    ToneFilterChip(
-                        selected = draft.favoritesOnly,
-                        onClick = {
-                            draft = draft.copy(favoritesOnly = !draft.favoritesOnly)
-                        },
-                        label = { Text(stringResource(R.string.history_filter_favorites_only)) },
+                    val favoriteOptions = listOf(
+                        FavoriteFilter.FAVORITE to
+                            stringResource(R.string.history_filter_favorite),
+                        FavoriteFilter.NOT_FAVORITE to
+                            stringResource(R.string.history_filter_not_favorite),
                     )
+                    favoriteOptions.forEach { (option, label) ->
+                        val selected = draft.favorites?.contains(option) == true
+                        ToneFilterChip(
+                            selected = selected,
+                            onClick = {
+                                val current = draft.favorites ?: emptySet()
+                                val next = if (selected) current - option else current + option
+                                draft = draft.copy(favorites = next.ifEmpty { null })
+                            },
+                            label = { Text(label) },
+                        )
+                    }
                 }
             }
 

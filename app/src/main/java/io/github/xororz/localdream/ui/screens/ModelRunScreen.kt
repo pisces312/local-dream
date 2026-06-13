@@ -2,7 +2,6 @@ package io.github.xororz.localdream.ui.screens
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -176,6 +175,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
+import androidx.paging.compose.collectAsLazyPagingItems
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import io.github.xororz.localdream.BuildConfig
@@ -205,7 +205,7 @@ import io.github.xororz.localdream.ui.components.ImportParametersDialog
 import io.github.xororz.localdream.ui.components.OverlayIconButton
 import io.github.xororz.localdream.ui.components.PromptTagTextField
 import io.github.xororz.localdream.ui.components.ReproduceParametersDialog
-import io.github.xororz.localdream.ui.components.ShareParametersDialog
+import io.github.xororz.localdream.ui.components.ShareParamsFlow
 import io.github.xororz.localdream.ui.components.SmoothLinearWavyProgressIndicator
 import io.github.xororz.localdream.ui.components.ZoomableImageOverlay
 import io.github.xororz.localdream.ui.theme.Motion
@@ -231,6 +231,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -262,7 +263,6 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     val msgImageSaved = stringResource(R.string.image_saved)
     val msgDeleted = stringResource(R.string.deleted)
     val msgDeleteFailedMessage = stringResource(R.string.delete_failed_message)
-    val msgShareCopied = stringResource(R.string.share_copied)
     val msgImportApplied = stringResource(R.string.import_applied)
     val msgUpscaleFailed = stringResource(R.string.upscale_failed)
     val msgUltrafixFailed = stringResource(R.string.ultrafix_failed)
@@ -298,8 +298,14 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     var historyFilter by remember(modelId) {
         mutableStateOf(HistoryFilter(modelIds = setOf(modelId)))
     }
-    val historyFlow = remember(historyFilter) { historyManager.observe(historyFilter) }
-    val historyItems by historyFlow.collectAsState(initial = emptyList())
+    val pagedHistory = remember(historyFilter) { historyManager.pager(historyFilter) }
+        .collectAsLazyPagingItems()
+    val historyTotalCount by remember(historyFilter) { historyManager.observeCount(historyFilter) }
+        .collectAsState(initial = 0)
+    // Bounded newest-first feed for the result-page thumbnail strip and the
+    // seed-on-open effect; avoids materializing the full history.
+    val recentHistory by remember(historyFilter) { historyManager.observeRecent(historyFilter, 20) }
+        .collectAsState(initial = emptyList())
     val knownModelIds by remember { historyManager.observeKnownModelIds() }
         .collectAsState(initial = emptyList())
     val knownSchedulers by remember { historyManager.observeKnownSchedulers() }
@@ -327,7 +333,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
 
     // Selection mode state
     var isSelectionMode by remember { mutableStateOf(false) }
-    val selectedItems = remember { mutableStateListOf<HistoryItem>() }
+    val selectedIds = remember { mutableStateListOf<Long>() }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
     var showBatchSaveDialog by remember { mutableStateOf(false) }
     var isBatchSaving by remember { mutableStateOf(false) }
@@ -505,6 +511,13 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     // original Bitmap object or a fresh decode from clicking the thumbnail again).
     var stitchableHistoryIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var currentDisplayedHistoryId by remember { mutableStateOf<Long?>(null) }
+    // Favorite flag of the image currently on the result page, looked up by id
+    // so it stays correct even when the row isn't in a loaded history page.
+    val displayedFavorite by remember(currentDisplayedHistoryId) {
+        currentDisplayedHistoryId
+            ?.let { historyManager.observeFavorite(it) }
+            ?: flowOf(null)
+    }.collectAsState(initial = null)
 
     var saveAllJob: Job? by remember { mutableStateOf(null) }
     var batchGenerationJob: Job? by remember { mutableStateOf(null) }
@@ -1197,9 +1210,9 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     // has been generated this session yet; the empty state only remains for
     // models without any history. Re-checked after the decode so a result
     // that completed meanwhile is never overwritten.
-    LaunchedEffect(historyItems) {
+    LaunchedEffect(recentHistory) {
         if (currentBitmap != null) return@LaunchedEffect
-        val item = historyItems.firstOrNull() ?: return@LaunchedEffect
+        val item = recentHistory.firstOrNull() ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
             BitmapFactory.decodeFile(item.imageFile.absolutePath)
         }
@@ -2283,7 +2296,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                             currentBitmap = currentBitmap,
                             imageVersion = imageVersion,
                             generationParams = generationParams,
-                            historyItems = historyItems,
+                            recentHistory = recentHistory,
                             showReportButton = BuildConfig.FLAVOR == "filter",
                             // Upscaling is only offered for the NPU runtime and resolutions <= 1024
                             showUpscaleButton = !model.runOnCpu &&
@@ -2305,15 +2318,17 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                         maxOf(currentWidth, currentHeight, 512)
                                 } == true,
                             ultrafixEnabled = !isRunning && !isUpscaling && !isUltrafixPreparing,
-                            isFavorite = historyItems
-                                .find { it.id == currentDisplayedHistoryId }
-                                ?.favorite,
+                            isFavorite = if (currentDisplayedHistoryId != null) {
+                                displayedFavorite
+                            } else {
+                                null
+                            },
                             onFavoriteClick = {
-                                val item = historyItems
-                                    .find { it.id == currentDisplayedHistoryId }
-                                if (item != null) {
+                                val id = currentDisplayedHistoryId
+                                val current = displayedFavorite
+                                if (id != null && current != null) {
                                     scope.launch(Dispatchers.IO) {
-                                        historyManager.setFavorite(item.id, !item.favorite)
+                                        historyManager.setFavorite(id, !current)
                                     }
                                 }
                             },
@@ -2366,22 +2381,23 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         2 -> ModelRunHistoryPage(
                             historyFilter = historyFilter,
                             currentModelId = modelId,
-                            historyItems = historyItems,
+                            pagedItems = pagedHistory,
+                            totalCount = historyTotalCount,
                             isSelectionMode = isSelectionMode,
-                            selectedItems = selectedItems,
+                            selectedIds = selectedIds.toSet(),
                             isBatchSaving = isBatchSaving,
                             onFilterChange = { historyFilter = it },
                             onShowFilterSheet = { showHistoryFilterSheet = true },
                             onItemClick = { item ->
                                 if (isSelectionMode) {
                                     // Toggle selection
-                                    if (item in selectedItems) {
-                                        selectedItems.remove(item)
-                                        if (selectedItems.isEmpty()) {
+                                    if (item.id in selectedIds) {
+                                        selectedIds.remove(item.id)
+                                        if (selectedIds.isEmpty()) {
                                             isSelectionMode = false
                                         }
                                     } else {
-                                        selectedItems.add(item)
+                                        selectedIds.add(item.id)
                                     }
                                 } else {
                                     // Normal preview
@@ -2392,23 +2408,26 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                             onItemLongClick = { item ->
                                 if (!isSelectionMode) {
                                     isSelectionMode = true
-                                    selectedItems.clear()
-                                    selectedItems.add(item)
+                                    selectedIds.clear()
+                                    selectedIds.add(item.id)
                                 }
                             },
                             onExitSelection = {
                                 isSelectionMode = false
-                                selectedItems.clear()
+                                selectedIds.clear()
                             },
                             onToggleSelectAll = {
-                                val isAllSelected = selectedItems.size == historyItems.size &&
-                                    historyItems.all { it in selectedItems }
-                                if (isAllSelected) {
-                                    selectedItems.clear()
+                                // Select-all covers every match via an id query,
+                                // not only the loaded pages.
+                                if (historyTotalCount > 0 && selectedIds.size >= historyTotalCount) {
+                                    selectedIds.clear()
                                     isSelectionMode = false
                                 } else {
-                                    selectedItems.clear()
-                                    selectedItems.addAll(historyItems)
+                                    scope.launch {
+                                        val allIds = historyManager.queryIds(historyFilter)
+                                        selectedIds.clear()
+                                        selectedIds.addAll(allIds)
+                                    }
                                 }
                             },
                             onBatchSave = { showBatchSaveDialog = true },
@@ -2986,24 +3005,33 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     // Batch save confirmation dialog
-    if (showBatchSaveDialog && selectedItems.isNotEmpty()) {
+    if (showBatchSaveDialog && selectedIds.isNotEmpty()) {
         ModelRunConfirmDialog(
             title = stringResource(R.string.batch_save),
             text = pluralStringResource(
                 R.plurals.batch_save_confirm,
-                selectedItems.size,
-                selectedItems.size,
+                selectedIds.size,
+                selectedIds.size,
             ),
             confirmText = stringResource(R.string.yes),
             onConfirm = {
-                val items = selectedItems.toList()
+                val ids = selectedIds.toList()
                 showBatchSaveDialog = false
-                if (items.isNotEmpty()) {
-                    batchSaveTotal = items.size
+                if (ids.isNotEmpty()) {
+                    batchSaveTotal = ids.size
                     batchSaveCurrent = 0
                     batchSaveFailed = 0
                     isBatchSaving = true
                     scope.launch(Dispatchers.IO) {
+                        // Resolve ids to items; any gone-missing counts as failed.
+                        val items = historyManager.getItems(ids)
+                        val missing = ids.size - items.size
+                        if (missing > 0) {
+                            withContext(Dispatchers.Main) {
+                                batchSaveFailed += missing
+                                batchSaveCurrent += missing
+                            }
+                        }
                         items.forEach { item ->
                             var success = false
                             if (item.imageFile.exists()) {
@@ -3038,7 +3066,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                 Toast.LENGTH_SHORT,
                             ).show()
                             isBatchSaving = false
-                            selectedItems.clear()
+                            selectedIds.clear()
                             isSelectionMode = false
                         }
                     }
@@ -3054,21 +3082,23 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     // Batch delete confirmation dialog
-    if (showBatchDeleteDialog && selectedItems.isNotEmpty()) {
+    if (showBatchDeleteDialog && selectedIds.isNotEmpty()) {
         ModelRunConfirmDialog(
             title = stringResource(R.string.batch_delete),
             text = pluralStringResource(
                 R.plurals.batch_delete_confirm,
-                selectedItems.size,
-                selectedItems.size,
+                selectedIds.size,
+                selectedIds.size,
             ),
             confirmText = stringResource(R.string.delete),
             destructiveConfirm = true,
             onConfirm = {
+                val ids = selectedIds.toList()
+                showBatchDeleteDialog = false
                 scope.launch {
-                    val itemsToDelete = selectedItems.toList()
+                    val itemsToDelete = historyManager.getItems(ids)
                     var successCount = 0
-                    var failCount = 0
+                    var failCount = ids.size - itemsToDelete.size
 
                     itemsToDelete.forEach { item ->
                         val success = historyManager.deleteHistoryItem(
@@ -3081,9 +3111,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         }
                     }
 
-                    selectedItems.clear()
+                    selectedIds.clear()
                     isSelectionMode = false
-                    showBatchDeleteDialog = false
 
                     val message = if (failCount == 0) {
                         resources.getQuantityString(
@@ -3125,75 +3154,14 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
 
     // Share parameters dialog
     shareSourceParams?.let { source ->
-        val available = remember(source) {
-            val list = mutableListOf<ParamShareField>()
-            list += ParamShareField.PROMPT
-            list += ParamShareField.NEGATIVE_PROMPT
-            list += ParamShareField.STEPS
-            list += ParamShareField.CFG
-            if (source.seed != null) list += ParamShareField.SEED
-            list += ParamShareField.SCHEDULER
-            if (source.mode != GenerationMode.UNKNOWN &&
-                source.mode != GenerationMode.TXT2IMG
-            ) {
-                list += ParamShareField.DENOISE_STRENGTH
-            }
-            list
-        }
-        ShareParametersDialog(
-            availableFields = available,
-            fieldPreview = { field ->
-                when (field) {
-                    ParamShareField.PROMPT -> source.prompt
-
-                    ParamShareField.NEGATIVE_PROMPT -> source.negativePrompt
-
-                    ParamShareField.STEPS -> source.steps.toString()
-
-                    ParamShareField.CFG -> "%.1f".format(source.cfg)
-
-                    ParamShareField.SEED -> source.seed?.toString()
-
-                    ParamShareField.SCHEDULER -> when (source.scheduler) {
-                        "dpm" -> "DPM++ 2M"
-                        "dpm_karras" -> "DPM++ 2M Karras"
-                        "euler_a" -> "Euler A"
-                        "euler_a_karras" -> "Euler A Karras"
-                        "lcm" -> "LCM"
-                        "euler" -> "Euler"
-                        "euler_karras" -> "Euler Karras"
-                        "dpm_sde" -> "DPM++ 2M SDE"
-                        "dpm_sde_karras" -> "DPM++ 2M SDE Karras"
-                        else -> source.scheduler
-                    }
-
-                    ParamShareField.DENOISE_STRENGTH ->
-                        "%.2f".format(source.denoiseStrength)
-
-                    ParamShareField.MODE -> source.mode.name.lowercase()
-                }
-            },
+        ShareParamsFlow(
+            source = source,
+            modelId = shareSourceModelId,
             useBase64Initial = shareUseBase64,
             onUseBase64Changed = { value ->
                 scope.launch { generationPreferences.setShareUseBase64(value) }
             },
-            onConfirm = { selectedFields, useBase64 ->
-                val json = ParamShare.buildJson(source, shareSourceModelId, selectedFields)
-                val payload = ParamShare.encodeForClipboard(json, useBase64)
-                val clipboard =
-                    context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                clipboard?.setPrimaryClip(
-                    ClipData.newPlainText("Local Dream params", payload),
-                )
-                clipboardImportChecked = true
-                shareSourceParams = null
-                shareSourceModelId = null
-                Toast.makeText(
-                    context,
-                    msgShareCopied,
-                    Toast.LENGTH_SHORT,
-                ).show()
-            },
+            onCopied = { clipboardImportChecked = true },
             onDismiss = {
                 shareSourceParams = null
                 shareSourceModelId = null

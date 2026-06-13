@@ -19,6 +19,7 @@ material3-xml = "1.12.0"
 coil-compose = "2.4.0"
 cropify = "0.5.1"
 room = "2.8.4"
+paging = "3.3.6"
 ksp = "2.3.8"
 ktlint-gradle = "14.2.0"
 detekt = "1.23.7"
@@ -52,7 +53,10 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 cropify = { module = "com.github.MoyuruAizawa:cropify", version.ref = "cropify" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-paging = { group = "androidx.room", name = "room-paging", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime", version.ref = "paging" }
+androidx-paging-compose = { group = "androidx.paging", name = "paging-compose", version.ref = "paging" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

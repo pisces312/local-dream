@@ -83,6 +83,9 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.paging.LoadState
+import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.itemKey
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import io.github.xororz.localdream.R
@@ -96,7 +99,8 @@ internal fun ModelRunResultPage(
     currentBitmap: Bitmap?,
     imageVersion: Int,
     generationParams: GenerationParameters?,
-    historyItems: List<HistoryItem>,
+    // Newest few items only (bounded query); drives the thumbnail strip.
+    recentHistory: List<HistoryItem>,
     showReportButton: Boolean,
     showUpscaleButton: Boolean,
     upscaleEnabled: Boolean,
@@ -301,9 +305,9 @@ internal fun ModelRunResultPage(
                             }
                         }
 
-                        if (historyItems.size > 1) {
+                        if (recentHistory.size > 1) {
                             val thumbListState = rememberLazyListState()
-                            val newestId = historyItems.firstOrNull()?.id
+                            val newestId = recentHistory.firstOrNull()?.id
                             LaunchedEffect(newestId) {
                                 // New items are inserted at the head and the keyed
                                 // lazy list anchors to the currently visible thumb,
@@ -331,7 +335,7 @@ internal fun ModelRunResultPage(
                                 ),
                             ) {
                                 items(
-                                    historyItems.take(20),
+                                    recentHistory.take(20),
                                     key = { it.id },
                                 ) { item ->
                                     Card(
@@ -424,10 +428,11 @@ internal fun ModelRunResultPage(
 @Composable
 internal fun ModelRunHistoryPage(
     historyFilter: HistoryFilter,
-    currentModelId: String,
-    historyItems: List<HistoryItem>,
+    currentModelId: String?,
+    pagedItems: LazyPagingItems<HistoryItem>,
+    totalCount: Int,
     isSelectionMode: Boolean,
-    selectedItems: List<HistoryItem>,
+    selectedIds: Set<Long>,
     isBatchSaving: Boolean,
     onFilterChange: (HistoryFilter) -> Unit,
     onShowFilterSheet: () -> Unit,
@@ -450,22 +455,31 @@ internal fun ModelRunHistoryPage(
     Column(
         modifier = Modifier.fillMaxSize(),
     ) {
-        HistoryFilterBar(
-            filter = historyFilter,
-            currentModelId = currentModelId,
-            onShowFilterSheet = onShowFilterSheet,
-            onSetCurrentModelOnly = {
-                onFilterChange(historyFilter.copy(modelIds = setOf(currentModelId)))
-            },
-            onSetAllModels = {
-                onFilterChange(historyFilter.copy(modelIds = null))
-            },
-        )
+        // The global history screen hosts its filter entry in the top app
+        // bar; only the model run screen (which has no app bar of its own for
+        // this tab) shows the inline current/all + filter bar.
+        if (currentModelId != null) {
+            HistoryFilterBar(
+                filter = historyFilter,
+                currentModelId = currentModelId,
+                onShowFilterSheet = onShowFilterSheet,
+                onSetCurrentModelOnly = {
+                    onFilterChange(historyFilter.copy(modelIds = setOf(currentModelId)))
+                },
+                onSetAllModels = {
+                    onFilterChange(historyFilter.copy(modelIds = null))
+                },
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize(),
         ) {
-            if (historyItems.isEmpty()) {
+            // Only show the empty state once the initial load has settled, so
+            // it never flashes while the first page is still being fetched.
+            val isEmpty = pagedItems.itemCount == 0 &&
+                pagedItems.loadState.refresh is LoadState.NotLoading
+            if (isEmpty) {
                 var emptyVisible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { emptyVisible = true }
                 val emptyAlpha by animateFloatAsState(
@@ -510,8 +524,14 @@ internal fun ModelRunHistoryPage(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(historyItems, key = { it.id }) { item ->
-                        val isSelected = selectedItems.contains(item)
+                    items(
+                        count = pagedItems.itemCount,
+                        key = pagedItems.itemKey { it.id },
+                    ) { index ->
+                        // With placeholders disabled, get() returns non-null for
+                        // every index below itemCount; guard anyway for safety.
+                        val item = pagedItems[index] ?: return@items
+                        val isSelected = item.id in selectedIds
                         Card(
                             modifier = Modifier.aspectRatio(1f),
                             shape = MaterialTheme.shapes.medium,
@@ -628,8 +648,7 @@ internal fun ModelRunHistoryPage(
 
             // Floating selection mode bottom bar
             if (isSelectionMode) {
-                val isAllSelected =
-                    selectedItems.size == historyItems.size && historyItems.all { it in selectedItems }
+                val isAllSelected = totalCount > 0 && selectedIds.size >= totalCount
                 HorizontalFloatingToolbar(
                     expanded = true,
                     modifier = Modifier
@@ -668,7 +687,7 @@ internal fun ModelRunHistoryPage(
                             }
                             IconButton(
                                 onClick = onBatchSave,
-                                enabled = selectedItems.isNotEmpty() && !isBatchSaving,
+                                enabled = selectedIds.isNotEmpty() && !isBatchSaving,
                                 colors = IconButtonDefaults.iconButtonColors(
                                     contentColor = MaterialTheme.colorScheme.primary,
                                 ),
@@ -680,7 +699,7 @@ internal fun ModelRunHistoryPage(
                             }
                             IconButton(
                                 onClick = onBatchDelete,
-                                enabled = selectedItems.isNotEmpty() && !isBatchSaving,
+                                enabled = selectedIds.isNotEmpty() && !isBatchSaving,
                                 colors = IconButtonDefaults.iconButtonColors(
                                     contentColor = MaterialTheme.colorScheme.error,
                                 ),
@@ -696,8 +715,8 @@ internal fun ModelRunHistoryPage(
                     Text(
                         text = pluralStringResource(
                             R.plurals.selected_items_count,
-                            selectedItems.size,
-                            selectedItems.size,
+                            selectedIds.size,
+                            selectedIds.size,
                         ),
                         style = MaterialTheme.typography.titleMedium,
                     )
