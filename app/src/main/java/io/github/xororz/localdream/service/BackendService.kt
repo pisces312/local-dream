@@ -13,8 +13,10 @@ import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -22,6 +24,23 @@ import kotlinx.coroutines.launch
 class BackendService : Service() {
     @Volatile
     private var process: Process? = null
+
+    // Set true around an intentional teardown (and reset just before a new
+    // start) so the monitor thread doesn't surface the resulting process exit
+    // as a backend Error. backendState is a process-wide StateFlow shared
+    // across Service instances, so a stale Error would otherwise be read by
+    // the next model's health check and shown as "backend start failed".
+    @Volatile
+    private var stopping = false
+
+    // Desired-state reconciliation. `desired` is the config the screen wants
+    // running (null = nothing); `serving` is what the live process was actually
+    // started for. Both are touched only on the single backend thread via
+    // reconcile(), so no extra locking is needed. idleStopJob is the pending
+    // grace-period teardown scheduled by a stop request.
+    private var desired: BackendConfig? = null
+    private var serving: BackendConfig? = null
+    private var idleStopJob: Job? = null
     private lateinit var runtimeDir: File
 
     @Volatile
@@ -42,17 +61,36 @@ class BackendService : Service() {
         private const val NOTIFICATION_ID = 2
         private const val CHANNEL_ID = "backend_service_channel"
 
+        // Grace window before a stop request actually tears the backend down.
+        // A re-entry within this window (same or different model) cancels the
+        // teardown and reconciles in-place, so quick back-then-reopen reuses
+        // the live process and model switches stay on one Service instance
+        // (single-threaded, no cross-instance start/stop race). Affects only
+        // reuse/latency, never correctness: a slower re-entry just starts fresh.
+        private const val IDLE_GRACE_MS = 1500L
+
         const val ACTION_STOP = "io.github.xororz.localdream.STOP_GENERATION"
         const val ACTION_RESTART = "io.github.xororz.localdream.RESTART_BACKEND"
 
         private object StateHolder {
             val _backendState = MutableStateFlow<BackendState>(BackendState.Idle)
+
+            // modelId the live process is serving (null when none). Process-wide
+            // so a screen can tell whether 8081 is already serving *its* model
+            // vs. a previous model still alive in the stop grace window.
+            val _servingModelId = MutableStateFlow<String?>(null)
         }
 
         val backendState: StateFlow<BackendState> = StateHolder._backendState
 
+        val servingModelId: StateFlow<String?> = StateHolder._servingModelId
+
         private fun updateState(state: BackendState) {
             StateHolder._backendState.value = state
+        }
+
+        private fun updateServingModelId(modelId: String?) {
+            StateHolder._servingModelId.value = modelId
         }
     }
 
@@ -60,8 +98,22 @@ class BackendService : Service() {
         object Idle : BackendState()
         object Starting : BackendState()
         object Running : BackendState()
-        data class Error(val message: String) : BackendState()
+
+        // modelId is the model this failure pertains to, or null for a failure
+        // that affects any model (e.g. runtime preparation). Lets a screen
+        // ignore an error left over from a *different* model's process (a crash
+        // in the stop grace window) instead of mistaking it for its own.
+        data class Error(val message: String, val modelId: String? = null) : BackendState()
     }
+
+    // What a backend process is (or should be) running for. Equality drives
+    // reconcile()'s "already serving this exact config" decision.
+    private data class BackendConfig(
+        val modelId: String,
+        val backendType: String,
+        val width: Int,
+        val height: Int,
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -72,48 +124,100 @@ class BackendService : Service() {
     override fun onBind(intent: Intent): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.i(TAG, "service started command: ${intent?.action}")
+        Log.i(TAG, "service command: ${intent?.action}")
         startForeground(
             NOTIFICATION_ID,
             createNotification(this.getString(R.string.backend_notify)),
         )
 
-        if (intent?.action == ACTION_STOP) {
-            Log.d("GenerationService", "stop")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        val isRestart = intent?.action == ACTION_RESTART
+        // Commands only declare intent; the single backend thread converges the
+        // actual process to it via reconcile(). This keeps every start/stop
+        // ordered and race-free regardless of how fast the screen comes and goes.
+        when (intent?.action) {
+            ACTION_STOP -> serviceScope.launch { requestStop(startId) }
 
-        val modelId = intent?.getStringExtra("modelId")
-        // Backend type is decided by the caller (it already has the Model);
-        // re-deriving it here would require a full model-directory scan.
-        val backendType = intent?.getStringExtra("backendType")
-        val width = intent?.getIntExtra("width", 512) ?: 512
-        val height = intent?.getIntExtra("height", 512) ?: 512
-        serviceScope.launch {
-            if (isRestart) {
-                Log.i(TAG, "restarting backend service")
-                stopBackend()
-            }
-            if (modelId == null) return@launch
-            when {
-                backendType == null -> {
-                    updateState(BackendState.Error("Model not found"))
-                    stopSelf()
-                }
-
-                // prepareRuntimeDir already published its own error state.
-                !runtimeDirReady -> stopSelf()
-
-                startBackend(modelId, backendType, width, height) ->
-                    updateState(BackendState.Running)
-
-                else -> updateState(BackendState.Error("Backend start failed"))
+            else -> {
+                val forceRestart = intent?.action == ACTION_RESTART
+                val config = parseConfig(intent)
+                serviceScope.launch { requestStart(config, forceRestart) }
             }
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun parseConfig(intent: Intent?): BackendConfig? {
+        val modelId = intent?.getStringExtra("modelId") ?: return null
+        // Backend type is decided by the caller (it already has the Model);
+        // re-deriving it here would require a full model-directory scan.
+        val backendType = intent.getStringExtra("backendType") ?: return null
+        val width = intent.getIntExtra("width", 512)
+        val height = intent.getIntExtra("height", 512)
+        return BackendConfig(modelId, backendType, width, height)
+    }
+
+    // Declares the desired backend and converges to it. Cancels any pending
+    // idle teardown first so a quick re-entry keeps the live process.
+    private fun requestStart(config: BackendConfig?, forceRestart: Boolean) {
+        if (config == null) {
+            updateState(BackendState.Error("Model not found"))
+            return
+        }
+        idleStopJob?.cancel()
+        idleStopJob = null
+        desired = config
+        reconcile(forceRestart)
+    }
+
+    // Declares that nothing should run, but only tears down after a grace
+    // window. A re-entry within the window cancels this job and reconciles in
+    // place; otherwise the process is stopped and the Service stops itself.
+    private fun requestStop(startId: Int) {
+        desired = null
+        idleStopJob?.cancel()
+        idleStopJob = serviceScope.launch {
+            delay(IDLE_GRACE_MS)
+            // A re-entry during the delay normally cancels us. The startId guard
+            // closes the remaining edge where a new command's onStartCommand
+            // raced in just as the grace fired: stopSelfResult() refuses to stop
+            // when a newer start exists, leaving the (re)started service alive
+            // with its foreground notification intact.
+            if (desired == null) {
+                stopBackend()
+                if (stopSelfResult(startId)) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                }
+            }
+        }
+    }
+
+    // Converges the actual process to `desired`. Runs only on the single
+    // backend thread, so reading current state and any start/stop are atomic
+    // with respect to other commands.
+    private fun reconcile(forceRestart: Boolean) {
+        val want = desired ?: return
+        // prepareRuntimeDir runs earlier on this same thread and publishes its
+        // own error on failure; if it didn't finish ready, leave that state.
+        if (!runtimeDirReady) {
+            return
+        }
+        val alreadyServing = process?.isAlive == true && serving == want
+        if (alreadyServing && !forceRestart) {
+            Log.i(TAG, "backend already serving ${want.modelId} ${want.width}x${want.height}")
+            updateServingModelId(want.modelId)
+            updateState(BackendState.Running)
+            return
+        }
+        stopBackend()
+        if (startBackend(want)) {
+            serving = want
+            updateServingModelId(want.modelId)
+            updateState(BackendState.Running)
+        } else {
+            serving = null
+            updateServingModelId(null)
+            updateState(BackendState.Error("Backend start failed", want.modelId))
+        }
     }
 
     override fun onTimeout(startId: Int) {
@@ -128,10 +232,12 @@ class BackendService : Service() {
 
     private fun handleTimeout(fgsType: Int) {
         Log.e(TAG, "Foreground service timeout (fgsType=$fgsType)")
-        updateState(BackendState.Error("Service timeout"))
+        updateState(BackendState.Error("Service timeout", servingModelId.value))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         serviceScope.launch {
+            desired = null
+            idleStopJob?.cancel()
             try {
                 stopBackend()
             } catch (e: Exception) {
@@ -249,15 +355,16 @@ class BackendService : Service() {
         }
     }
 
-    private fun startBackend(modelId: String, backendType: String, width: Int, height: Int): Boolean {
+    private fun startBackend(config: BackendConfig): Boolean {
+        val modelId = config.modelId
+        val backendType = config.backendType
+        val width = config.width
+        val height = config.height
         Log.i(TAG, "backend start, model: $modelId, resolution: $width×$height")
 
-        // Defensive: if a previous process is still tracked (e.g. the Service
-        // instance was reused for a fresh start without going through
-        // ACTION_RESTART), tear it down first so its reference is never
-        // overwritten and leaked. Done before publishing Starting so the
-        // transient Idle from stopBackend doesn't clobber our state.
-        stopBackend()
+        // reconcile() has already stopped any previous process; just re-arm
+        // crash reporting for the process we are about to start.
+        stopping = false
         updateState(BackendState.Starting)
 
         try {
@@ -373,36 +480,49 @@ class BackendService : Service() {
                 environment().putAll(env)
             }
 
-            process = processBuilder.start()
+            val proc = processBuilder.start()
+            process = proc
 
-            startMonitorThread()
+            startMonitorThread(proc)
 
             return true
         } catch (e: Exception) {
             Log.e(TAG, "backend start failed", e)
-            updateState(BackendState.Error("backend start failed: ${e.message}"))
+            updateState(BackendState.Error("backend start failed: ${e.message}", config.modelId))
             return false
         }
     }
 
-    private fun startMonitorThread() {
+    private fun startMonitorThread(proc: Process) {
         Thread {
-            try {
-                process?.let { proc ->
-                    proc.inputStream.bufferedReader().use { reader ->
-                        var line: String?
-                        while (reader.readLine().also { line = it } != null) {
-                            Log.i(TAG, "Backend: $line")
-                        }
+            val exitCode = try {
+                proc.inputStream.bufferedReader().use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        Log.i(TAG, "Backend: $line")
                     }
-
-                    val exitCode = proc.waitFor()
-                    Log.i(TAG, "Backend process exited with code: $exitCode")
-                    updateState(BackendState.Error("Backend process exited with code: $exitCode"))
                 }
+                proc.waitFor()
             } catch (e: Exception) {
                 Log.e(TAG, "monitor error", e)
-                updateState(BackendState.Error("monitor error: ${e.message}"))
+                if (isLiveCrash(proc)) {
+                    updateState(BackendState.Error("monitor error: ${e.message}", servingModelId.value))
+                }
+                return@Thread
+            }
+            Log.i(TAG, "Backend process exited with code: $exitCode")
+            // Only surface as an error when this is still the active process and
+            // we didn't intentionally stop it; a torn-down or superseded process
+            // exiting is expected and must not poison the shared backendState.
+            if (isLiveCrash(proc)) {
+                updateState(
+                    BackendState.Error(
+                        "Backend process exited with code: $exitCode",
+                        servingModelId.value,
+                    ),
+                )
+            } else {
+                Log.i(TAG, "backend exit ($exitCode) was intentional/stale, not reporting")
             }
         }.apply {
             isDaemon = true
@@ -410,12 +530,17 @@ class BackendService : Service() {
         }
     }
 
+    // True when proc is still the tracked process and no intentional stop is in
+    // progress, i.e. its exit really is an unexpected crash worth reporting.
+    private fun isLiveCrash(proc: Process): Boolean = !stopping && process === proc
+
     override fun onDestroy() {
         super.onDestroy()
         // The scope is never cancelled, so this job still runs after
         // onDestroy returns; closing the dispatcher afterwards lets its
         // thread wind down once the backend process has exited.
         serviceScope.launch {
+            idleStopJob?.cancel()
             stopBackend()
             backendDispatcher.close()
         }
@@ -423,6 +548,10 @@ class BackendService : Service() {
 
     private fun stopBackend() {
         Log.i(TAG, "to stop backend")
+        // Mark the upcoming exit as intentional before destroy() so the monitor
+        // thread (which wakes the instant the process dies) won't race ahead and
+        // report it as a crash.
+        stopping = true
         process?.let { proc ->
             try {
                 proc.destroy()
@@ -440,5 +569,7 @@ class BackendService : Service() {
                 process = null
             }
         }
+        serving = null
+        updateServingModelId(null)
     }
 }

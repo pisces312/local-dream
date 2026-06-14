@@ -84,6 +84,8 @@ internal suspend fun tokenizePromptRequest(text: String): TokenizeResult? = with
 
 internal suspend fun checkBackendHealth(
     backendState: StateFlow<BackendService.BackendState>,
+    servingModelId: StateFlow<String?>,
+    expectedModelId: String,
     onHealthy: () -> Unit,
     onUnhealthy: () -> Unit,
 ) = withContext(Dispatchers.IO) {
@@ -94,37 +96,58 @@ internal suspend fun checkBackendHealth(
         // model loading takes seconds to minutes, so hammering every 100 ms
         // for the whole window is pointless.
         var pollDelayMs = 100L
+        var ownErrorStreak = 0
 
         while (currentCoroutineContext().isActive) {
-            if (backendState.value is BackendService.BackendState.Error) {
-                withContext(Dispatchers.Main) {
-                    onUnhealthy()
-                }
-                break
-            }
+            val state = backendState.value
+            // Only an error for this model (or a model-agnostic one) is ours; an
+            // error left over from a different model's process still alive in the
+            // stop grace window is not.
+            val ownError = state is BackendService.BackendState.Error &&
+                (state.modelId == null || state.modelId == expectedModelId)
 
-            if (System.currentTimeMillis() - startTime > timeoutDuration) {
-                withContext(Dispatchers.Main) {
-                    onUnhealthy()
-                }
-                break
-            }
-
-            try {
-                val request = Request.Builder()
-                    .url("http://localhost:8081/health")
-                    .get()
-                    .build()
-
-                val response = healthClient.newCall(request).execute()
-                if (response.isSuccessful) {
+            if (ownError) {
+                // Require it to persist across a poll interval before failing: a
+                // stale error from a previous run is superseded within ms by the
+                // start this screen just issued (Starting/Running) and won't
+                // survive to the next iteration; a genuine failure does.
+                ownErrorStreak++
+                if (ownErrorStreak >= 2) {
                     withContext(Dispatchers.Main) {
-                        onHealthy()
+                        onUnhealthy()
                     }
                     break
                 }
-            } catch (e: Exception) {
-                // Backend not up yet; retry after the current delay.
+            } else {
+                ownErrorStreak = 0
+
+                if (System.currentTimeMillis() - startTime > timeoutDuration) {
+                    withContext(Dispatchers.Main) {
+                        onUnhealthy()
+                    }
+                    break
+                }
+
+                try {
+                    val request = Request.Builder()
+                        .url("http://localhost:8081/health")
+                        .get()
+                        .build()
+
+                    val healthy = healthClient.newCall(request).execute().use { it.isSuccessful }
+                    // A 200 only proves *some* backend answers on 8081. During a
+                    // model switch (and the stop grace window) the previous model
+                    // can still be alive, so also require the service to report it
+                    // is serving the model this screen wants before declaring ready.
+                    if (healthy && servingModelId.value == expectedModelId) {
+                        withContext(Dispatchers.Main) {
+                            onHealthy()
+                        }
+                        break
+                    }
+                } catch (e: Exception) {
+                    // Backend not up yet; retry after the current delay.
+                }
             }
 
             delay(pollDelayMs)

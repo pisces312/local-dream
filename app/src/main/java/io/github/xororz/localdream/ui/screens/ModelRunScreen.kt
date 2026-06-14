@@ -1161,7 +1161,11 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     LaunchedEffect(hasInitialized) {
-        if (hasInitialized && backendState !is BackendService.BackendState.Running) {
+        if (hasInitialized) {
+            // Always declare the target; BackendService reconciles idempotently
+            // (reuses a live process for the same model, restarts otherwise).
+            // Reading the shared backendState here to decide would race with the
+            // previous screen's still-pending stop and could skip the start.
             val intent = Intent(context, BackendService::class.java).apply {
                 putExtra("modelId", model?.id)
                 putExtra("backendType", model?.backendType)
@@ -1496,6 +1500,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     LaunchedEffect(Unit) {
         checkBackendHealth(
             backendState = BackendService.backendState,
+            servingModelId = BackendService.servingModelId,
+            expectedModelId = modelId,
             onHealthy = {
                 isCheckingBackend = false
             },
@@ -1511,6 +1517,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             delay(500)
             checkBackendHealth(
                 backendState = BackendService.backendState,
+                servingModelId = BackendService.servingModelId,
+                expectedModelId = modelId,
                 onHealthy = {
                     isCheckingBackend = false
                 },
