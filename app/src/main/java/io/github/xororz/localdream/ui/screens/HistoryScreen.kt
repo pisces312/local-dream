@@ -204,7 +204,10 @@ fun HistoryScreen(navController: NavController) {
             knownModelIds = knownModelIds,
             knownSchedulers = knownSchedulers,
             knownSizes = knownSizes,
-            onApply = { historyFilter = it },
+            onApply = {
+                historyFilter = it
+                showFilterSheet = false
+            },
             onDismiss = { showFilterSheet = false },
         )
     }
