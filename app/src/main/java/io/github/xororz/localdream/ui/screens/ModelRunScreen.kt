@@ -2978,8 +2978,22 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 if (ParamShareField.NEGATIVE_PROMPT in selectedFields) {
                     negativePromptField.replaceText(params.negativePrompt)
                 }
+                // An UltraFix image was produced by the tiled img2img repair pass,
+                // whose steps/denoise live in their own UltraFix variables. Route
+                // the reproduced values there (denoise is stored as a strength but
+                // edited as a step count) instead of the prompt-page settings.
+                val isUltrafixParams = params.mode == GenerationMode.ULTRAFIX
                 if (ParamShareField.STEPS in selectedFields) {
-                    steps = params.steps.toFloat()
+                    if (isUltrafixParams) {
+                        ultrafixSteps = params.steps.toFloat()
+                        val maxDenoiseSteps = minOf(
+                            GenerationDefaults.ULTRAFIX_DENOISE_STEPS_MAX,
+                            ultrafixSteps.roundToInt(),
+                        )
+                        ultrafixDenoiseSteps = ultrafixDenoiseSteps.coerceIn(0, maxDenoiseSteps)
+                    } else {
+                        steps = params.steps.toFloat()
+                    }
                 }
                 if (ParamShareField.CFG in selectedFields) {
                     cfg = params.cfg
@@ -2991,7 +3005,22 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                     scheduler = params.scheduler
                 }
                 if (ParamShareField.DENOISE_STRENGTH in selectedFields) {
-                    denoiseStrength = params.denoiseStrength
+                    if (isUltrafixParams) {
+                        // Invert strength = (steps - 0.5) / total -> steps.
+                        val total = params.steps
+                        val maxDenoiseSteps = minOf(
+                            GenerationDefaults.ULTRAFIX_DENOISE_STEPS_MAX,
+                            total,
+                        )
+                        ultrafixDenoiseSteps =
+                            (params.denoiseStrength * total + 0.5f).roundToInt()
+                                .coerceIn(0, maxDenoiseSteps)
+                    } else {
+                        denoiseStrength = params.denoiseStrength
+                    }
+                }
+                if (isUltrafixParams) {
+                    saveUltrafixParams()
                 }
                 if (model?.isSdxl == true && useImg2img) {
                     val newRatio = inferAspectRatioString(params.width, params.height)
