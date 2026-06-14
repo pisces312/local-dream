@@ -41,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -182,6 +183,57 @@ private fun DeleteConfirmDialog(
     )
 }
 
+@Composable
+private fun RenameModelDialog(
+    currentName: String,
+    existingIds: Set<String>,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf(currentName) }
+    // The id is the directory name: spaces are stripped, matching how custom
+    // models are created. Validate against that derived id.
+    val newId = name.replace(" ", "")
+    val isBlank = newId.isEmpty()
+    val isReserved = ModelRepository.isReservedModelId(newId)
+    val isTaken = newId in existingIds
+    val errorText = when {
+        isReserved -> stringResource(R.string.custom_model_id_reserved)
+        isTaken -> stringResource(R.string.rename_name_exists)
+        else -> null
+    }
+    val canConfirm = !isBlank && !isReserved && !isTaken
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.rename_model)) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.rename_model_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                isError = errorText != null,
+                supportingText = errorText?.let { { Text(it) } },
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (canConfirm) onConfirm(name) },
+                enabled = canConfirm,
+            ) {
+                Text(stringResource(R.string.confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
 @OptIn(
     ExperimentalMaterial3Api::class,
     ExperimentalMaterial3ExpressiveApi::class,
@@ -210,6 +262,8 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     val msgTagImportFailed = stringResource(R.string.tag_import_failed)
     val msgCleanTempNone = stringResource(R.string.clean_temp_none)
     val msgCleanTempDone = stringResource(R.string.clean_temp_done)
+    val msgRenameSuccess = stringResource(R.string.rename_success)
+    val msgRenameFailed = stringResource(R.string.rename_failed)
 
     var downloadingModel by remember { mutableStateOf<Model?>(null) }
     var currentProgress by remember { mutableStateOf<DownloadProgress?>(null) }
@@ -220,6 +274,11 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
 
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedModels by remember { mutableStateOf(setOf<Model>()) }
+
+    // Ordered pinned ids; drives the pinned-first sort within each tab. Loaded
+    // once and kept in sync as the user pins/unpins/renames.
+    var pinnedIds by remember { mutableStateOf(PinnedModels.get(context)) }
+    var renameTarget by remember { mutableStateOf<Model?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior =
@@ -316,11 +375,11 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
         modelRepository.ensureLoaded()
     }
 
-    val cpuModels = remember(modelRepository.models) {
-        modelRepository.models.filter { it.runOnCpu }
+    val cpuModels = remember(modelRepository.models, pinnedIds) {
+        PinnedModels.sort(modelRepository.models.filter { it.runOnCpu }, pinnedIds)
     }
-    val npuModels = remember(modelRepository.models) {
-        modelRepository.models.filter { !it.runOnCpu }
+    val npuModels = remember(modelRepository.models, pinnedIds) {
+        PinnedModels.sort(modelRepository.models.filter { !it.runOnCpu }, pinnedIds)
     }
 
     val lastViewedPage = remember {
@@ -695,6 +754,29 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
         )
     }
 
+    renameTarget?.let { model ->
+        RenameModelDialog(
+            currentName = model.name,
+            existingIds = modelRepository.models.map { it.id }.toSet() - model.id,
+            onConfirm = { newName ->
+                renameTarget = null
+                isSelectionMode = false
+                selectedModels = emptySet()
+                scope.launch {
+                    val result = model.rename(context, newName)
+                    if (result is RenameResult.Success) {
+                        modelRepository.refreshAllModels()
+                        pinnedIds = PinnedModels.get(context)
+                        snackbarHostState.showSnackbar(msgRenameSuccess)
+                    } else {
+                        snackbarHostState.showSnackbar(msgRenameFailed)
+                    }
+                }
+            },
+            onDismiss = { renameTarget = null },
+        )
+    }
+
     showDownloadConfirm?.let { model ->
         if (downloadingModel != null) {
             AlertDialog(
@@ -802,6 +884,42 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 actions = {
                     if (isSelectionMode) {
                         if (selectedModels.isNotEmpty()) {
+                            // Left to right: pin, rename (single custom only), delete.
+                            val allPinned = selectedModels.all { it.id in pinnedIds }
+                            IconButton(onClick = {
+                                val ids = selectedModels.map { it.id }
+                                if (allPinned) {
+                                    PinnedModels.unpin(context, ids)
+                                } else {
+                                    PinnedModels.pin(context, ids)
+                                }
+                                pinnedIds = PinnedModels.get(context)
+                                isSelectionMode = false
+                                selectedModels = emptySet()
+                            }) {
+                                Icon(
+                                    imageVector = if (allPinned) {
+                                        Icons.Default.PushPin
+                                    } else {
+                                        Icons.Outlined.PushPin
+                                    },
+                                    contentDescription = stringResource(
+                                        if (allPinned) {
+                                            R.string.unpin_from_top
+                                        } else {
+                                            R.string.pin_to_top
+                                        },
+                                    ),
+                                )
+                            }
+
+                            val singleSelected = selectedModels.singleOrNull()
+                            if (singleSelected != null && singleSelected.isCustom) {
+                                IconButton(onClick = { renameTarget = singleSelected }) {
+                                    Icon(Icons.Default.Edit, stringResource(R.string.rename))
+                                }
+                            }
+
                             IconButton(onClick = { showDeleteConfirm = true }) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.delete))
                             }
@@ -941,6 +1059,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             ),
                             isSelected = selectedModels.contains(model),
                             isSelectionMode = isSelectionMode,
+                            isPinned = model.id in pinnedIds,
                             onClick = {
                                 if (!Model.isDeviceSupported() && !model.runOnCpu) {
                                     scope.launch {
@@ -1788,6 +1907,7 @@ fun ModelCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     onUpdateClick: () -> Unit = {},
+    isPinned: Boolean = false,
 ) {
     val isDisabledInSelection = !model.isDownloaded && isSelectionMode
 
@@ -1871,12 +1991,26 @@ fun ModelCard(
                     .fillMaxWidth()
                     .padding(16.dp),
             ) {
-                Text(
-                    text = model.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Normal,
-                    color = primaryContent,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (isPinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = stringResource(R.string.pin_to_top),
+                            tint = primaryContent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Text(
+                        text = model.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Normal,
+                        color = primaryContent,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = model.description,

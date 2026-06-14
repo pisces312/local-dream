@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.service.ModelDownloadService
 import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -95,6 +96,15 @@ sealed class DownloadResult {
     data class Progress(val progress: DownloadProgress) : DownloadResult()
 }
 
+sealed class RenameResult {
+    data object Success : RenameResult()
+
+    // Caller decides messaging; BlankName/Reserved/Exists are recoverable input
+    // errors, Io means the on-disk move failed.
+    enum class Reason { BlankName, Reserved, Exists, Io }
+    data class Error(val reason: Reason) : RenameResult()
+}
+
 @Immutable
 data class Model(
     val id: String,
@@ -152,6 +162,7 @@ data class Model(
                 HistoryManager(context).clearHistoryForModel(id)
             }
             generationPreferences.clearPreferencesForModel(id)
+            PinnedModels.unpin(context, listOf(id))
 
             if (modelDir.exists() && modelDir.isDirectory) {
                 val deleted = modelDir.deleteRecursively()
@@ -165,6 +176,48 @@ data class Model(
             Log.e("Model", "error: ${e.message}")
             false
         }
+    }
+
+    // Rename a custom model, migrating every artifact keyed by its id: the
+    // model directory, history (files + DB rows), per-model preferences and the
+    // pinned list. The model directory is moved first because scanCustomModels()
+    // keys off it; if that move fails nothing else is touched.
+    suspend fun rename(context: Context, newName: String): RenameResult = withContext(Dispatchers.IO) {
+        val newId = newName.replace(" ", "")
+        when {
+            newId.isEmpty() -> return@withContext RenameResult.Error(RenameResult.Reason.BlankName)
+
+            newId == id -> return@withContext RenameResult.Success
+
+            ModelRepository.isReservedModelId(newId) ->
+                return@withContext RenameResult.Error(RenameResult.Reason.Reserved)
+        }
+
+        val modelsDir = getModelsDir(context)
+        val oldDir = File(modelsDir, id)
+        val newDir = File(modelsDir, newId)
+        if (!oldDir.exists()) return@withContext RenameResult.Error(RenameResult.Reason.Io)
+        if (newDir.exists()) return@withContext RenameResult.Error(RenameResult.Reason.Exists)
+
+        if (!oldDir.renameTo(newDir)) {
+            return@withContext RenameResult.Error(RenameResult.Reason.Io)
+        }
+
+        // The directory move is the commit point: the model is now usable under
+        // its new id. Migrate the remaining artifacts best-effort. A rare failure
+        // here degrades gracefully (saved params/history may not carry over) but
+        // must not be reported as a failed rename, since the model HAS been
+        // renamed. Cancellation must still propagate.
+        try {
+            HistoryManager(context).renameModel(id, newId)
+            GenerationPreferences(context).migratePreferencesForModel(id, newId)
+            PinnedModels.rename(context, id, newId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("Model", "rename post-move migration partly failed: ${e.message}")
+        }
+        RenameResult.Success
     }
 
     companion object {

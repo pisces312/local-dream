@@ -212,6 +212,31 @@ class HistoryManager(private val context: Context) {
         }
     }
 
+    // Move a model's history (image files + DB rows) to a new id. The DB path
+    // rewrite mirrors the directory move so saved thumbnails keep resolving.
+    suspend fun renameModel(oldId: String, newId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val oldDir = File(filesDir, "history/$oldId")
+            if (oldDir.exists()) {
+                val newDir = File(filesDir, "history/$newId")
+                newDir.parentFile?.mkdirs()
+                if (newDir.exists()) {
+                    oldDir.listFiles()?.forEach { file ->
+                        file.renameTo(File(newDir, file.name))
+                    }
+                    oldDir.delete()
+                } else {
+                    oldDir.renameTo(newDir)
+                }
+            }
+            dao.renameModelId(oldId, newId)
+            true
+        } catch (e: Exception) {
+            Log.e("HistoryManager", "Failed to rename model history", e)
+            false
+        }
+    }
+
     suspend fun clearHistoryForModel(modelId: String): Boolean = withContext(Dispatchers.IO) {
         try {
             dao.deleteAllForModel(modelId)

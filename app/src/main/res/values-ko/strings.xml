@@ -253,6 +253,14 @@
     <string name="custom_model_name">모델 이름</string>
     <string name="custom_model_name_hint">모델 이름 입력</string>
     <string name="custom_model_id_reserved">이 이름은 내장 모델과 충돌합니다. 다른 이름을 선택하세요.</string>
+    <string name="pin_to_top">상단 고정</string>
+    <string name="unpin_from_top">고정 해제</string>
+    <string name="rename">이름 변경</string>
+    <string name="rename_model">모델 이름 변경</string>
+    <string name="rename_model_label">새 이름</string>
+    <string name="rename_name_exists">같은 이름의 모델이 이미 있습니다.</string>
+    <string name="rename_success">이름이 변경되었습니다</string>
+    <string name="rename_failed">이름 변경 실패</string>
     <string name="select_model_file">모델 파일 선택</string>
     <string name="select_zip_file">ZIP 파일 선택</string>
     <string name="zip_file_selected">ZIP 파일을 선택했습니다</string>

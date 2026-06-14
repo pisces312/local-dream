@@ -253,6 +253,14 @@
     <string name="custom_model_name">モデル名</string>
     <string name="custom_model_name_hint">モデル名を入力</string>
     <string name="custom_model_id_reserved">この名前は組み込みモデルと競合します。別の名前を使用してください。</string>
+    <string name="pin_to_top">トップに固定</string>
+    <string name="unpin_from_top">固定を解除</string>
+    <string name="rename">名前を変更</string>
+    <string name="rename_model">モデル名を変更</string>
+    <string name="rename_model_label">新しい名前</string>
+    <string name="rename_name_exists">同じ名前のモデルが既に存在します。</string>
+    <string name="rename_success">名前を変更しました</string>
+    <string name="rename_failed">名前の変更に失敗しました</string>
     <string name="select_model_file">モデルファイルを選択</string>
     <string name="select_zip_file">ZIPファイルを選択</string>
     <string name="zip_file_selected">ZIPファイルを選択</string>

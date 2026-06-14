@@ -253,6 +253,14 @@
     <string name="custom_model_name">模型名称</string>
     <string name="custom_model_name_hint">输入模型名称</string>
     <string name="custom_model_id_reserved">该名称与内置模型冲突，请使用其他名称</string>
+    <string name="pin_to_top">置顶</string>
+    <string name="unpin_from_top">取消置顶</string>
+    <string name="rename">重命名</string>
+    <string name="rename_model">重命名模型</string>
+    <string name="rename_model_label">新名称</string>
+    <string name="rename_name_exists">已存在同名模型</string>
+    <string name="rename_success">已重命名</string>
+    <string name="rename_failed">重命名失败</string>
     <string name="select_model_file">选择模型文件</string>
     <string name="select_zip_file">选择ZIP文件</string>
     <string name="zip_file_selected">ZIP文件已选择</string>

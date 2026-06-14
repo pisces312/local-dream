@@ -169,6 +169,41 @@ class GenerationPreferences(private val context: Context) {
             )
         }
 
+    // Copy every per-model key from oldId to newId, then drop the originals.
+    // Generic over value type so it stays correct as new per-model keys are
+    // added; the "${id}_" prefix (with the underscore) prevents bleeding into
+    // a different model whose id merely shares a prefix.
+    suspend fun migratePreferencesForModel(oldId: String, newId: String) {
+        if (oldId == newId) return
+        val prefix = "${oldId}_"
+        context.dataStore.edit { preferences ->
+            val oldKeys = preferences.asMap().keys.filter { it.name.startsWith(prefix) }
+            for (key in oldKeys) {
+                val value = preferences[key] ?: continue
+                val newName = newId + "_" + key.name.removePrefix(prefix)
+                when (value) {
+                    is String -> preferences[stringPreferencesKey(newName)] = value
+
+                    is Int -> preferences[intPreferencesKey(newName)] = value
+
+                    is Float -> preferences[floatPreferencesKey(newName)] = value
+
+                    is Boolean -> preferences[booleanPreferencesKey(newName)] = value
+
+                    is Long -> preferences[longPreferencesKey(newName)] = value
+
+                    is Double -> preferences[doublePreferencesKey(newName)] = value
+
+                    is Set<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        preferences[stringSetPreferencesKey(newName)] = value as Set<String>
+                    }
+                }
+                preferences.remove(key)
+            }
+        }
+    }
+
     suspend fun clearPreferencesForModel(modelId: String) {
         context.dataStore.edit { preferences ->
             preferences.remove(getPromptKey(modelId))
