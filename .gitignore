@@ -8,11 +8,14 @@
 .externalNativeBuild
 .cxx
 local.properties
-app/src/main/jniLibs
+# app/src/main/jniLibs  --  allow pre-built .so for fork
 app/release
 app/basic
 app/filter
-app/src/main/assets/qnnlibs
+# app/src/main/assets/qnnlibs  --  allow QNN runtime libs for fork
 
 # Kotlin compiler session artifacts
 .kotlin/
+
+# Build outputs at project root
+*.apk
