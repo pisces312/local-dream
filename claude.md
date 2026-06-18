@@ -199,29 +199,54 @@ Local Dream 是一个 Android 应用，允许在本地设备上运行 Stable Dif
 -   `signingConfigs` - 需要 `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` (通过 `gradle.properties` 或环境变量传入)
 
 **Signing Config (for release builds):**
+
+`app/build.gradle.kts` 使用**条件签名**配置：
+- 如果 Gradle 属性 `RELEASE_STORE_FILE` 存在，Gradle 自动签名
+- 否则 Gradle 输出 **unsigned APK**，由构建脚本调用 `apksigner` 签名（推荐方式）
+
+**方式 A：Gradle 自动签名（需 gradle.properties 或环境变量）**
 ```properties
-# gradle.properties (or environment variables)
+# gradle.properties (or -P flags)
 RELEASE_STORE_FILE=keystore.jks
 RELEASE_STORE_PASSWORD=password
 RELEASE_KEY_ALIAS=alias
 RELEASE_KEY_PASSWORD=password
 ```
 
+**方式 B：构建脚本签名（推荐，环境变量驱动）**
+```bash
+# Windows Git Bash / WSL / Linux
+export KEY_STORE=/path/to/keystore.jks
+export KEY_STORE_PASSWORD=password
+export KEY_ALIAS=alias        # optional, default: pisces312
+
+./build-local.sh release basic
+```
+
+环境变量签名不将密钥信息写入任何文件，符合安全最佳实践。`build-local.sh` 在 Windows 下自动处理路径转换（`cygpath`），确保 `zipalign` 和 `apksigner` 正确工作。
+
 **Build Commands:**
 ```bash
 # Debug build (no signing required)
-./gradlew assembleDebug
+./gradlew assembleBasicDebug
 
-# Release build (requires signing config)
-./gradlew assembleRelease
+# Release build via script (recommended, handles signing + path conversion on Windows)
+./build-local.sh release basic
+
+# Release build, filter flavor (with safety checker)
+./build-local.sh release filter
 
 # Install debug build to connected device
-./gradlew installDebug
+./build-local.sh debug basic -d 192.168.1.5:5555
+
+# Rebuild C++ backend (requires QNN SDK + NDK, then build APK)
+./build-local.sh release --rebuild-native
 ```
 
 **Output APK:**
--   Debug: `app/build/outputs/apk/basic/debug/LocalDream_armv8a_2.7.0.apk` (约 127 MB，含 `libstable_diffusion_core.so` 和 `qnnlibs`)
--   Release: `app/build/outputs/apk/basic/release/LocalDream_armv8a_2.7.0.apk`
+-   Debug: `LocalDream_armv8a_2.7.0-basic-debug.apk` (约 133 MB)
+-   Release (signed): `LocalDream_armv8a_2.7.0-basic-signed.apk` (约 55 MB, 含 R8 压缩)
+-   Release (unsigned): `LocalDream_armv8a_2.7.0-basic-unsigned.apk`
 
 ### C++ Backend Build (libstable_diffusion_core.so)
 
@@ -349,6 +374,6 @@ local-dream/
 
 ---
 
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-18
 **Fork maintainer:** pisces312 (https://github.com/pisces312/local-dream)
 **Upstream:** xororz (https://github.com/xororz/local-dream)

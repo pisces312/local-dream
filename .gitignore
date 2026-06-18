@@ -19,3 +19,4 @@ app/filter
 
 # Build outputs at project root
 *.apk
+*.idsig

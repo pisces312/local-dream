@@ -155,8 +155,9 @@ data class Model(
 
     suspend fun deleteModel(context: Context, keepHistory: Boolean = true): Boolean = withContext(Dispatchers.IO) {
         try {
-            val modelDir = File(getModelsDir(context), id)
             val generationPreferences = GenerationPreferences(context)
+            val customPath = generationPreferences.getModelsStoragePath()
+            val modelDir = File(getModelsDir(context, customPath), id)
 
             if (!keepHistory) {
                 HistoryManager(context).clearHistoryForModel(id)
@@ -193,7 +194,9 @@ data class Model(
                 return@withContext RenameResult.Error(RenameResult.Reason.Reserved)
         }
 
-        val modelsDir = getModelsDir(context)
+        val generationPreferences = GenerationPreferences(context)
+        val customPath = generationPreferences.getModelsStoragePath()
+        val modelsDir = getModelsDir(context, customPath)
         val oldDir = File(modelsDir, id)
         val newDir = File(modelsDir, newId)
         if (!oldDir.exists()) return@withContext RenameResult.Error(RenameResult.Reason.Io)

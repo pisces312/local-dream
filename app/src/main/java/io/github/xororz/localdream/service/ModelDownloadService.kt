@@ -144,7 +144,11 @@ class ModelDownloadService : Service() {
                             unzipFile(tempFile, extractTempDir)
 
                             extractTempDir.listFiles()?.forEach { file ->
-                                file.renameTo(File(modelDir, file.name))
+                                val destFile = File(modelDir, file.name)
+                                if (!file.renameTo(destFile)) {
+                                    file.copyTo(destFile, overwrite = true)
+                                    file.delete()
+                                }
                             }
                             extractTempDir.delete()
                             extractTempDir = null

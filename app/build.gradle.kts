@@ -49,7 +49,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(project.findProperty("RELEASE_STORE_FILE") as String? ?: "keystore.jks")
+            storeFile = project.findProperty("RELEASE_STORE_FILE")?.let { file(it as String) }
             storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
             keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
             keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
@@ -69,13 +69,18 @@ android {
     }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (project.hasProperty("RELEASE_STORE_FILE")) {
+                signingConfigs.getByName("release")
+            } else {
+                null
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-//            signingConfig = signingConfigs.getByName("release")
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "_debug"
         }
     }
     compileOptions {

@@ -456,24 +456,19 @@
     <string name="models_storage_migrate_done">Migration complete</string>
     <string name="models_storage_migrate_failed">Migration failed: %s</string>
     <string name="models_storage_path_unresolvable">Cannot resolve selected directory to a filesystem path</string>
-    <!-- Model Export / Import -->
-    <string name="model_export_title">Model Export / Import</string>
-    <string name="model_export_desc">Export downloaded models to a ZIP for backup or transfer. Import models from a previously exported ZIP.</string>
-    <string name="model_export_no_models">No downloaded models to export</string>
-    <string name="model_export_selected">%1$d / %2$d selected (%3$s)</string>
-    <string name="model_export_export">Export</string>
-    <string name="model_export_import">Import</string>
-    <string name="model_export_exporting">Exporting %1$d / %2$d files</string>
-    <string name="model_export_importing">Importing %1$d / %2$d files</string>
-    <string name="model_export_export_done">Exported %1$d models (%2$s)</string>
-    <string name="model_export_import_done">Imported %1$d models (%2$s)</string>
-    <string name="model_export_import_preview">%1$d models in this archive:</string>
-    <string name="model_export_overwrite_hint">Existing models with the same ID will be overwritten</string>
-    <string name="model_export_import_confirm">Import</string>
-    <string name="model_export_failed_models">%1$d models could not be exported</string>
-    <string name="model_export_import_failed">%1$d files failed to import</string>
-    <string name="model_export_empty">Archive contains no models</string>
-    <string name="model_export_invalid_file">Not a valid Local Dream model export file</string>
-    <string name="model_export_error">Operation failed: %1$s</string>
     <string name="permission_all_files_desc">Model export/import requires access to all files. Please grant the permission in settings.</string>
+
+    <!-- File Manager -->
+    <string name="no_files">No files found</string>
+    <string name="export_success">Export completed</string>
+    <string name="export_failed">Export failed</string>
+    <string name="exporting">Exporting…</string>
+    <string name="export_file">Export</string>
+    <string name="delete_warning_title">Delete Warning</string>
+    <string name="delete_warning_text">Deleting "%s" may cause the app to malfunction. Are you sure?</string>
+    <string name="delete_anyway">Delete Anyway</string>
+    <string name="import_file">Import</string>
+    <string name="importing">Importing…</string>
+    <string name="import_success">Import completed</string>
+    <string name="import_failed">Import failed</string>
 </resources>
