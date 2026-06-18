@@ -36,6 +36,8 @@ class GenerationPreferences(private val context: Context) {
     private val SHARE_CLEAR_CLIPBOARD_KEY =
         booleanPreferencesKey("share_clear_clipboard_on_import")
 
+    private val MODELS_STORAGE_PATH_KEY = stringPreferencesKey("models_storage_path")
+
     // UltraFix step/denoise are per-model (each model keeps its own repair
     // recipe), independent of that model's main generation params. Denoise is
     // stored as a step count; the strength sent to the backend is derived at
@@ -85,6 +87,26 @@ class GenerationPreferences(private val context: Context) {
     suspend fun saveBaseUrl(url: String) {
         context.dataStore.edit { preferences ->
             preferences[BASE_URL_KEY] = url
+        }
+    }
+
+    fun observeModelsStoragePath(): Flow<String?> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { it[MODELS_STORAGE_PATH_KEY] }
+
+    suspend fun getModelsStoragePath(): String? = context.dataStore.data
+        .map { it[MODELS_STORAGE_PATH_KEY] }
+        .first()
+
+    suspend fun saveModelsStoragePath(path: String?) {
+        context.dataStore.edit { preferences ->
+            if (path != null) {
+                preferences[MODELS_STORAGE_PATH_KEY] = path
+            } else {
+                preferences.remove(MODELS_STORAGE_PATH_KEY)
+            }
         }
     }
 

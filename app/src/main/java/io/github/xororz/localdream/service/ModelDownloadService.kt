@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.utils.Http
 import java.io.File
@@ -295,8 +296,11 @@ class ModelDownloadService : Service() {
         stopSelf()
     }
 
-    private fun getModelsDir(): File = File(filesDir, "models").apply {
-        if (!exists()) mkdirs()
+    private val generationPreferences by lazy { GenerationPreferences(this) }
+
+    private suspend fun getModelsDir(): File {
+        val customPath = generationPreferences.getModelsStoragePath()
+        return Model.getModelsDir(this, customPath)
     }
 
     private fun createNotificationChannel() {

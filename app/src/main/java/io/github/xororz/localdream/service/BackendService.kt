@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
 import java.io.File
 import java.io.IOException
@@ -369,7 +370,12 @@ class BackendService : Service() {
 
         try {
             val nativeDir = applicationInfo.nativeLibraryDir
-            val modelsDir = File(Model.getModelsDir(this), modelId)
+            val customPath = runCatching {
+                kotlinx.coroutines.runBlocking {
+                    GenerationPreferences(this@BackendService).getModelsStoragePath()
+                }
+            }.getOrNull()
+            val modelsDir = File(Model.getModelsDir(this, customPath), modelId)
 
             val executableFile = File(nativeDir, EXECUTABLE_NAME)
 

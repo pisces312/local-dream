@@ -1,9 +1,13 @@
 package io.github.xororz.localdream
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -66,6 +70,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkStoragePermission() {
+        // Android 11+: request MANAGE_EXTERNAL_STORAGE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.permission_all_files_desc),
+                    Toast.LENGTH_LONG,
+                ).show()
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                )
+                startActivity(intent)
+            }
+        }
+
         // < Android 10
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             when {

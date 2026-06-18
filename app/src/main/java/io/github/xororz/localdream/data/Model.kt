@@ -33,8 +33,8 @@ object PatchScanner {
     private val squarePatchPattern = Regex("""^(\d+)\.patch$""")
     private val rectangularPatchPattern = Regex("""^(\d+)x(\d+)\.patch$""")
 
-    fun scanAvailableResolutions(context: Context, modelId: String): List<Resolution> {
-        val modelDir = File(Model.getModelsDir(context), modelId)
+    fun scanAvailableResolutions(context: Context, modelId: String, customPath: String? = null): List<Resolution> {
+        val modelDir = File(Model.getModelsDir(context, customPath), modelId)
         if (!modelDir.exists() || !modelDir.isDirectory) {
             return emptyList()
         }
@@ -247,16 +247,25 @@ data class Model(
             return null
         }
 
-        fun getModelsDir(context: Context): File = File(context.filesDir, MODELS_DIR).apply {
-            if (!exists()) mkdirs()
+        fun getModelsDir(context: Context, customPath: String? = null): File {
+            if (customPath != null) {
+                val dir = File(customPath)
+                if (dir.exists() && dir.isDirectory || dir.mkdirs()) {
+                    return dir
+                }
+                Log.w("Model", "Custom models path unreachable: $customPath, falling back to internal")
+            }
+            return File(context.filesDir, MODELS_DIR).apply {
+                if (!exists()) mkdirs()
+            }
         }
 
-        fun isModelDownloaded(context: Context, modelId: String, isCustom: Boolean = false): Boolean {
+        fun isModelDownloaded(context: Context, modelId: String, isCustom: Boolean = false, customPath: String? = null): Boolean {
             if (isCustom) {
                 return true
             }
 
-            val modelDir = File(getModelsDir(context), modelId)
+            val modelDir = File(getModelsDir(context, customPath), modelId)
             if (!modelDir.exists() || !modelDir.isDirectory) {
                 return false
             }
@@ -269,15 +278,15 @@ data class Model(
         // performUpscale() actually loads, not just a non-empty directory.
         const val UPSCALER_FILE_NAME = "upscaler.bin"
 
-        fun isUpscalerDownloaded(context: Context, upscalerId: String): Boolean {
-            val file = File(File(getModelsDir(context), upscalerId), UPSCALER_FILE_NAME)
+        fun isUpscalerDownloaded(context: Context, upscalerId: String, customPath: String? = null): Boolean {
+            val file = File(File(getModelsDir(context, customPath), upscalerId), UPSCALER_FILE_NAME)
             return file.exists() && file.length() > 0
         }
 
-        fun needsModelUpgrade(context: Context, modelId: String, isNpu: Boolean): Boolean {
+        fun needsModelUpgrade(context: Context, modelId: String, isNpu: Boolean, customPath: String? = null): Boolean {
             if (!isNpu) return false
 
-            val modelDir = File(getModelsDir(context), modelId)
+            val modelDir = File(getModelsDir(context, customPath), modelId)
             if (!modelDir.exists()) return false
 
             val vFile = File(modelDir, "v3")
@@ -319,11 +328,16 @@ class UpscalerRepository private constructor(private val context: Context) {
 
     private var isLoaded = false
 
+    // Cached custom storage path, refreshed alongside baseUrl.
+    private var modelsStoragePath: String? = null
+    private var baseUrl = "https://huggingface.co/"
+
     suspend fun ensureLoaded() {
         if (isLoaded) return
         refreshMutex.withLock {
             if (isLoaded) return
-            val baseUrl = generationPreferences.getBaseUrl()
+            baseUrl = generationPreferences.getBaseUrl()
+            modelsStoragePath = generationPreferences.getModelsStoragePath()
             upscalers = withContext(Dispatchers.IO) { initializeUpscalers(baseUrl) }
             isLoaded = true
         }
@@ -344,7 +358,7 @@ class UpscalerRepository private constructor(private val context: Context) {
         val fileUri =
             "xororz/upscaler/resolve/main/realesrgan_x4plus_anime_6b/upscaler_$suffix.bin"
 
-        val isDownloaded = Model.isUpscalerDownloaded(context, id)
+        val isDownloaded = Model.isUpscalerDownloaded(context, id, modelsStoragePath)
 
         return UpscalerModel(
             id = id,
@@ -360,7 +374,7 @@ class UpscalerRepository private constructor(private val context: Context) {
         val id = "upscaler_realistic"
         val fileUri = "xororz/upscaler/resolve/main/4x_UltraSharpV2_Lite/upscaler_$suffix.bin"
 
-        val isDownloaded = Model.isUpscalerDownloaded(context, id)
+        val isDownloaded = Model.isUpscalerDownloaded(context, id, modelsStoragePath)
 
         return UpscalerModel(
             id = id,
@@ -379,7 +393,8 @@ class UpscalerRepository private constructor(private val context: Context) {
     suspend fun refreshBaseUrl() {
         refreshMutex.withLock {
             if (!isLoaded) return
-            val baseUrl = generationPreferences.getBaseUrl()
+            baseUrl = generationPreferences.getBaseUrl()
+            modelsStoragePath = generationPreferences.getModelsStoragePath()
             upscalers = withContext(Dispatchers.IO) { initializeUpscalers(baseUrl) }
         }
     }
@@ -390,7 +405,7 @@ class UpscalerRepository private constructor(private val context: Context) {
             upscalers = withContext(Dispatchers.IO) {
                 current.map { upscaler ->
                     if (upscaler.id == upscalerId) {
-                        val isDownloaded = Model.isUpscalerDownloaded(context, upscaler.id)
+                        val isDownloaded = Model.isUpscalerDownloaded(context, upscaler.id, modelsStoragePath)
                         upscaler.copy(isDownloaded = isDownloaded)
                     } else {
                         upscaler
@@ -419,6 +434,13 @@ class ModelRepository private constructor(private val context: Context) {
     // preferences at the start of every refresh, always under refreshMutex.
     private var baseUrl = "https://huggingface.co/"
 
+    // User-configured custom models storage path (null = internal default).
+    // Refreshed at the start of every refreshAllModels().
+    private var modelsStoragePath: String? = null
+
+    /** Convenience wrapper that passes the cached custom path. */
+    private fun modelsDir(): File = Model.getModelsDir(context, modelsStoragePath)
+
     var models by mutableStateOf<List<Model>>(emptyList())
         private set
 
@@ -433,7 +455,7 @@ class ModelRepository private constructor(private val context: Context) {
     }
 
     private fun scanCustomModels(): List<Model> {
-        val modelsDir = Model.getModelsDir(context)
+        val modelsDir = modelsDir()
         val customModels = mutableListOf<Model>()
 
         if (modelsDir.exists() && modelsDir.isDirectory) {
@@ -524,7 +546,7 @@ class ModelRepository private constructor(private val context: Context) {
     // any values already merged into configDefaults (e.g. the custom model
     // placeholders) as fallback.
     private fun applyConfigDefaults(model: Model): Model {
-        val config = ModelConfig.read(File(Model.getModelsDir(context), model.id)) ?: return model
+        val config = ModelConfig.read(File(modelsDir(), model.id)) ?: return model
         return model.copy(configDefaults = config.withFallback(model.configDefaults))
     }
 
@@ -534,7 +556,7 @@ class ModelRepository private constructor(private val context: Context) {
         val id = "cyber_realistic_v10"
         val fileUri = "xororz/sdxl-qnn/resolve/main/cyber_realistic_v10_qnn2.28_8gen3.zip"
 
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -558,7 +580,7 @@ class ModelRepository private constructor(private val context: Context) {
         val id = "cyber_realistic_v10_dmd2"
         val fileUri = "xororz/sdxl-qnn/resolve/main/cyber_realistic_v10_dmd2_qnn2.28_8gen3.zip"
 
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -584,7 +606,7 @@ class ModelRepository private constructor(private val context: Context) {
         val id = "illustrious_v16"
         val fileUri = "xororz/sdxl-qnn/resolve/main/illustrious_v16_qnn2.28_8gen3.zip"
 
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -608,7 +630,7 @@ class ModelRepository private constructor(private val context: Context) {
         val id = "illustrious_v16_dmd2"
         val fileUri = "xororz/sdxl-qnn/resolve/main/illustrious_v16_dmd2_qnn2.28_8gen3.zip"
 
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -634,8 +656,8 @@ class ModelRepository private constructor(private val context: Context) {
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/AnythingV5_qnn2.28_$suffix.zip"
 
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
+        val needsUpgrade = Model.needsModelUpgrade(context, id, true, modelsStoragePath)
 
         return Model(
             id = id,
@@ -658,7 +680,7 @@ class ModelRepository private constructor(private val context: Context) {
         val id = "anythingv5cpu"
         val fileUri = "xororz/sd-mnn/resolve/main/AnythingV5.zip"
 
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -681,8 +703,8 @@ class ModelRepository private constructor(private val context: Context) {
         val soc = getDeviceSoc()
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/QteaMix_qnn2.28_$suffix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
+        val needsUpgrade = Model.needsModelUpgrade(context, id, true, modelsStoragePath)
 
         return Model(
             id = id,
@@ -703,7 +725,7 @@ class ModelRepository private constructor(private val context: Context) {
     private fun createQteaMixModelCPU(): Model {
         val id = "qteamixcpu"
         val fileUri = "xororz/sd-mnn/resolve/main/QteaMix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -726,8 +748,8 @@ class ModelRepository private constructor(private val context: Context) {
         val soc = getDeviceSoc()
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/CuteYukiMix_qnn2.28_$suffix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
+        val needsUpgrade = Model.needsModelUpgrade(context, id, true, modelsStoragePath)
 
         return Model(
             id = id,
@@ -748,7 +770,7 @@ class ModelRepository private constructor(private val context: Context) {
     private fun createCuteYukiMixModelCPU(): Model {
         val id = "cuteyukimixcpu"
         val fileUri = "xororz/sd-mnn/resolve/main/CuteYukiMix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -771,8 +793,8 @@ class ModelRepository private constructor(private val context: Context) {
         val soc = getDeviceSoc()
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/AbsoluteReality_qnn2.28_$suffix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
+        val needsUpgrade = Model.needsModelUpgrade(context, id, true, modelsStoragePath)
 
         return Model(
             id = id,
@@ -794,7 +816,7 @@ class ModelRepository private constructor(private val context: Context) {
     private fun createAbsoluteRealityModelCPU(): Model {
         val id = "absoluterealitycpu"
         val fileUri = "xororz/sd-mnn/resolve/main/AbsoluteReality.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -817,8 +839,8 @@ class ModelRepository private constructor(private val context: Context) {
         val soc = getDeviceSoc()
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/ChilloutMix_qnn2.28_$suffix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
+        val needsUpgrade = Model.needsModelUpgrade(context, id, true, modelsStoragePath)
 
         return Model(
             id = id,
@@ -840,7 +862,7 @@ class ModelRepository private constructor(private val context: Context) {
     private fun createChilloutMixModelCPU(): Model {
         val id = "chilloutmixcpu"
         val fileUri = "xororz/sd-mnn/resolve/main/ChilloutMix.zip"
-        val isDownloaded = Model.isModelDownloaded(context, id, false)
+        val isDownloaded = Model.isModelDownloaded(context, id, false, modelsStoragePath)
 
         return Model(
             id = id,
@@ -865,9 +887,9 @@ class ModelRepository private constructor(private val context: Context) {
                 current.map { model ->
                     if (model.id == modelId) {
                         val isDownloaded =
-                            Model.isModelDownloaded(context, modelId, model.isCustom)
+                            Model.isModelDownloaded(context, modelId, model.isCustom, modelsStoragePath)
                         val needsUpgrade = if (!model.runOnCpu) {
-                            Model.needsModelUpgrade(context, modelId, true)
+                            Model.needsModelUpgrade(context, modelId, true, modelsStoragePath)
                         } else {
                             false
                         }
@@ -888,6 +910,7 @@ class ModelRepository private constructor(private val context: Context) {
     suspend fun refreshAllModels() {
         refreshMutex.withLock {
             baseUrl = generationPreferences.getBaseUrl()
+            modelsStoragePath = generationPreferences.getModelsStoragePath()
             models = withContext(Dispatchers.IO) { initializeModels() }
             isLoaded = true
         }

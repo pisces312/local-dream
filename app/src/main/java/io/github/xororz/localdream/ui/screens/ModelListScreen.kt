@@ -287,6 +287,8 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showFileManagerDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
+    var showModelsStorageDialog by remember { mutableStateOf(false) }
+    var showModelExportDialog by remember { mutableStateOf(false) }
     var showCleanTempDialog by remember { mutableStateOf(false) }
     var tempScanBytes by remember { mutableLongStateOf(0L) }
     var showEmbeddingManagerDialog by remember { mutableStateOf(false) }
@@ -523,6 +525,24 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                     snackbarHostState.showSnackbar(msgFileDeleted)
                 }
             },
+        )
+    }
+
+    if (showModelsStorageDialog) {
+        ModelsStorageDialog(
+            onDismiss = { showModelsStorageDialog = false },
+            onPathChanged = {
+                scope.launch {
+                    modelRepository.refreshAllModels()
+                    snackbarHostState.showSnackbar(context.getString(R.string.models_storage_migrate_done))
+                }
+            },
+        )
+    }
+
+    if (showModelExportDialog) {
+        ModelExportDialog(
+            onDismiss = { showModelExportDialog = false },
         )
     }
 
@@ -1738,6 +1758,26 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             icon = Icons.Default.FolderOpen,
                             label = stringResource(R.string.file_manager),
                             onClick = { showFileManagerDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    // Models storage location
+                    item {
+                        SettingNavCard(
+                            icon = Icons.Default.Storage,
+                            label = stringResource(R.string.models_storage_title),
+                            onClick = { showModelsStorageDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    // Model export and import
+                    item {
+                        SettingNavCard(
+                            icon = Icons.Default.ImportExport,
+                            label = stringResource(R.string.model_export_title),
+                            onClick = { showModelExportDialog = true },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
