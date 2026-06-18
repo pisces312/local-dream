@@ -115,18 +115,17 @@ BUILD_DIR="$APP_DIR/build/outputs/apk/$FLAVOR/$BUILD_TYPE"
 APK_NAME="LocalDream_armv8a_${VERSION}.apk"
 
 if [[ "$BUILD_TYPE" == "release" ]]; then
-    SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}-unsigned.apk"
-    # Gradle may name it differently; try alternatives
+    SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}.apk"
     if [[ ! -f "$SOURCE_APK" ]]; then
-        SOURCE_APK="$BUILD_DIR/app-$FLAVOR-release-unsigned.apk"
+        SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}-unsigned.apk"
     fi
     if [[ ! -f "$SOURCE_APK" ]]; then
-        SOURCE_APK=$(ls "$BUILD_DIR"/*-unsigned.apk 2>/dev/null | head -1)
+        SOURCE_APK=$(ls "$BUILD_DIR"/*.apk 2>/dev/null | head -1)
     fi
 else
     SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}.apk"
     if [[ ! -f "$SOURCE_APK" ]]; then
-        SOURCE_APK="$BUILD_DIR/app-$FLAVOR-debug.apk"
+        SOURCE_APK=$(ls "$BUILD_DIR"/*.apk 2>/dev/null | head -1)
     fi
 fi
 
