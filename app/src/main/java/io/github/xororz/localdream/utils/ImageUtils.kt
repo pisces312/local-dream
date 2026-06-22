@@ -10,6 +10,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.ui.screens.GenerationParameters
 import java.io.ByteArrayOutputStream
@@ -55,8 +56,10 @@ private fun nextSaveFilename(extension: String): String {
 suspend fun performUpscale(context: Context, bitmap: Bitmap, upscalerId: String): Bitmap = withContext(Dispatchers.IO) {
     val totalStartTime = System.currentTimeMillis()
 
-    // Get upscaler model path
-    val upscalerModelsDir = File(Model.getModelsDir(context), upscalerId)
+    // Get upscaler model path - use external storage path if configured
+    val generationPreferences = GenerationPreferences(context)
+    val customPath = generationPreferences.getModelsStoragePath()
+    val upscalerModelsDir = File(Model.getModelsDir(context, customPath), upscalerId)
     val upscalerFile = File(upscalerModelsDir, Model.UPSCALER_FILE_NAME)
 
     if (!upscalerFile.exists()) {
