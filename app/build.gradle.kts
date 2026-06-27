@@ -49,10 +49,15 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = project.findProperty("RELEASE_STORE_FILE")?.let { file(it as String) }
-            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
-            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+            // Read from environment variables (KEY_STORE / KEY_STORE_PASSWORD / KEY_ALIAS).
+            // KEY_STORE_PASSWORD is reused as the key password unless KEY_PASSWORD is set.
+            val keyStorePath = System.getenv("KEY_STORE")
+            if (!keyStorePath.isNullOrBlank()) {
+                storeFile = file(keyStorePath)
+                storePassword = System.getenv("KEY_STORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS") ?: "pisces312"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: System.getenv("KEY_STORE_PASSWORD")
+            }
         }
     }
 
@@ -69,7 +74,7 @@ android {
     }
     buildTypes {
         release {
-            signingConfig = if (project.hasProperty("RELEASE_STORE_FILE")) {
+            signingConfig = if (!System.getenv("KEY_STORE").isNullOrBlank()) {
                 signingConfigs.getByName("release")
             } else {
                 null
@@ -81,6 +86,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "_debug"
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

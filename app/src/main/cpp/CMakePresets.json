@@ -15,13 +15,15 @@
         "ANDROID_NATIVE_API_LEVEL": "21",
         "CMAKE_SYSTEM_VERSION": "21",
         "CMAKE_ANDROID_NDK": "$env{ANDROID_NDK_ROOT}",
-        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
-        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_HOST_SYSTEM_NAME": "Windows",
+        "ANDROID_HOST_TAG": "windows-x86_64",
+        "CMAKE_C_COMPILER_LAUNCHER": "",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       },
       "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
       "environment": {
-        "ANDROID_NDK_ROOT": "/data/android-ndk-r28"
+        "ANDROID_NDK_ROOT": "D:/dev/android_sdk/ndk/28.2.13676358"
       }
     },
     {

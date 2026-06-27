@@ -196,34 +196,28 @@ Local Dream 是一个 Android 应用，允许在本地设备上运行 Stable Dif
 -   `abiFilters += "arm64-v8a"` (仅支持 ARM64)
 -   `useLegacyPackaging = true` (jniLibs 打包进 APK)
 -   `isMinifyEnabled = true` (release 构建启用代码压缩)
--   `signingConfigs` - 需要 `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD` (通过 `gradle.properties` 或环境变量传入)
+-   `signingConfigs` - 直接读环境变量 `KEY_STORE`, `KEY_STORE_PASSWORD`, `KEY_ALIAS`（默认 `pisces312`），可选 `KEY_PASSWORD`（默认复用 `KEY_STORE_PASSWORD`）
 
 **Signing Config (for release builds):**
 
 `app/build.gradle.kts` 使用**条件签名**配置：
-- 如果 Gradle 属性 `RELEASE_STORE_FILE` 存在，Gradle 自动签名
-- 否则 Gradle 输出 **unsigned APK**，由构建脚本调用 `apksigner` 签名（推荐方式）
+- 如果环境变量 `KEY_STORE` 已设置，Gradle 自动签名
+- 否则 Gradle 输出 **unsigned APK**，可由后续脚本（如 `build-sm8850.ps1`）调用 `apksigner` 签名
 
-**方式 A：Gradle 自动签名（需 gradle.properties 或环境变量）**
-```properties
-# gradle.properties (or -P flags)
-RELEASE_STORE_FILE=keystore.jks
-RELEASE_STORE_PASSWORD=password
-RELEASE_KEY_ALIAS=alias
-RELEASE_KEY_PASSWORD=password
-```
-
-**方式 B：构建脚本签名（推荐，环境变量驱动）**
+**环境变量签名（统一方式，不写入任何文件）**
 ```bash
 # Windows Git Bash / WSL / Linux
 export KEY_STORE=/path/to/keystore.jks
 export KEY_STORE_PASSWORD=password
-export KEY_ALIAS=alias        # optional, default: pisces312
+export KEY_ALIAS=alias              # optional, default: pisces312
+export KEY_PASSWORD=keypassword     # optional, default: $KEY_STORE_PASSWORD
 
-./build-local.sh release basic
+./gradlew assembleBasicRelease      # Gradle 自动签名
+# 或：
+./build-sm8850.ps1 release basic    # 先 Gradle 出 unsigned APK，再裁剪 + apksigner 签名
 ```
 
-环境变量签名不将密钥信息写入任何文件，符合安全最佳实践。`build-local.sh` 在 Windows 下自动处理路径转换（`cygpath`），确保 `zipalign` 和 `apksigner` 正确工作。
+> ⚠️ 老版本曾使用 `RELEASE_STORE_FILE` 等 Gradle property（通过 `local.properties` 注入）。现已废弃，统一改为读环境变量；`local.properties` 不再被项目使用。
 
 **Build Commands:**
 ```bash
