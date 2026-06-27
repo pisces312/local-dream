@@ -1,0 +1,13 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 200e394..793a1f3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -188,7 +188,7 @@ endif()
+ if (SPM_ABSL_PROVIDER STREQUAL "module")
+   include(FetchContent)
+   FetchContent_Populate(abseil-cpp
+-        GIT_REPOSITORY  https://github.com/abseil/abseil-cpp.git
++        GIT_REPOSITORY  https://ghfast.top/https://github.com/abseil/abseil-cpp.git
+         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/abseil-cpp
+         GIT_PROGRESS TRUE
+         GIT_TAG 20260526.0)
