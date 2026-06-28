@@ -33,6 +33,7 @@ import io.github.xororz.localdream.ui.screens.HistoryScreen
 import io.github.xororz.localdream.ui.screens.MigrationScreen
 import io.github.xororz.localdream.ui.screens.ModelListScreen
 import io.github.xororz.localdream.ui.screens.ModelRunScreen
+import io.github.xororz.localdream.ui.screens.LLMRunScreen
 import io.github.xororz.localdream.ui.screens.UpscaleScreen
 import io.github.xororz.localdream.ui.theme.LocalDreamTheme
 import io.github.xororz.localdream.ui.theme.LocalThemeController
@@ -215,6 +216,20 @@ private fun AppContent() {
         }
         composable(Screen.History.route) {
             HistoryScreen(navController)
+        }
+        composable(
+            route = Screen.LLMRun.route,
+            arguments = listOf(
+                navArgument("modelId") {
+                    type = NavType.StringType
+                },
+            ),
+        ) { backStackEntry ->
+            val modelId = backStackEntry.arguments?.getString("modelId") ?: ""
+            LLMRunScreen(
+                modelId = modelId,
+                navController = navController,
+            )
         }
     }
 }

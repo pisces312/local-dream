@@ -26,6 +26,10 @@ class BackendService : Service() {
     @Volatile
     private var process: Process? = null
 
+    // LLM process (separate from SD process)
+    @Volatile
+    private var llmProcess: Process? = null
+
     // Set true around an intentional teardown (and reset just before a new
     // start) so the monitor thread doesn't surface the resulting process exit
     // as a backend Error. backendState is a process-wide StateFlow shared
@@ -33,6 +37,9 @@ class BackendService : Service() {
     // the next model's health check and shown as "backend start failed".
     @Volatile
     private var stopping = false
+
+    @Volatile
+    private var llmStopping = false
 
     // Desired-state reconciliation. `desired` is the config the screen wants
     // running (null = nothing); `serving` is what the live process was actually
@@ -42,6 +49,12 @@ class BackendService : Service() {
     private var desired: BackendConfig? = null
     private var serving: BackendConfig? = null
     private var idleStopJob: Job? = null
+
+    // LLM desired-state reconciliation
+    private var llmDesired: LlmBackendConfig? = null
+    private var llmServing: LlmBackendConfig? = null
+    private var llmIdleStopJob: Job? = null
+
     private lateinit var runtimeDir: File
 
     @Volatile
@@ -58,6 +71,7 @@ class BackendService : Service() {
     companion object {
         private const val TAG = "BackendService"
         private const val EXECUTABLE_NAME = "libstable_diffusion_core.so"
+        private const val LLM_EXECUTABLE_NAME = "libllm_core.so"
         private const val RUNTIME_DIR = "runtime_libs"
         private const val NOTIFICATION_ID = 2
         private const val CHANNEL_ID = "backend_service_channel"
@@ -75,16 +89,17 @@ class BackendService : Service() {
 
         private object StateHolder {
             val _backendState = MutableStateFlow<BackendState>(BackendState.Idle)
-
-            // modelId the live process is serving (null when none). Process-wide
-            // so a screen can tell whether 8081 is already serving *its* model
-            // vs. a previous model still alive in the stop grace window.
             val _servingModelId = MutableStateFlow<String?>(null)
+
+            // LLM state
+            val _llmBackendState = MutableStateFlow<BackendState>(BackendState.Idle)
+            val _servingLlmModelId = MutableStateFlow<String?>(null)
         }
 
         val backendState: StateFlow<BackendState> = StateHolder._backendState
-
         val servingModelId: StateFlow<String?> = StateHolder._servingModelId
+        val llmBackendState: StateFlow<BackendState> = StateHolder._llmBackendState
+        val servingLlmModelId: StateFlow<String?> = StateHolder._servingLlmModelId
 
         private fun updateState(state: BackendState) {
             StateHolder._backendState.value = state
@@ -92,6 +107,14 @@ class BackendService : Service() {
 
         private fun updateServingModelId(modelId: String?) {
             StateHolder._servingModelId.value = modelId
+        }
+
+        private fun updateLlmState(state: BackendState) {
+            StateHolder._llmBackendState.value = state
+        }
+
+        private fun updateServingLlmModelId(modelId: String?) {
+            StateHolder._servingLlmModelId.value = modelId
         }
     }
 
@@ -114,6 +137,13 @@ class BackendService : Service() {
         val backendType: String,
         val width: Int,
         val height: Int,
+    )
+
+    // LLM backend config
+    private data class LlmBackendConfig(
+        val modelId: String,
+        val modelDir: String,
+        val htpConfig: String,
     )
 
     override fun onCreate() {
@@ -139,8 +169,15 @@ class BackendService : Service() {
 
             else -> {
                 val forceRestart = intent?.action == ACTION_RESTART
-                val config = parseConfig(intent)
-                serviceScope.launch { requestStart(config, forceRestart) }
+                val modelType = intent?.getStringExtra("modelType") ?: "sd"
+
+                if (modelType == "llm") {
+                    val config = parseLlmConfig(intent)
+                    serviceScope.launch { requestLlmStart(config) }
+                } else {
+                    val config = parseConfig(intent)
+                    serviceScope.launch { requestStart(config, forceRestart) }
+                }
             }
         }
 
@@ -157,6 +194,13 @@ class BackendService : Service() {
         return BackendConfig(modelId, backendType, width, height)
     }
 
+    private fun parseLlmConfig(intent: Intent?): LlmBackendConfig? {
+        val modelId = intent?.getStringExtra("modelId") ?: return null
+        val modelDir = intent.getStringExtra("modelDir") ?: return null
+        val htpConfig = intent.getStringExtra("htpConfig") ?: return null
+        return LlmBackendConfig(modelId, modelDir, htpConfig)
+    }
+
     // Declares the desired backend and converges to it. Cancels any pending
     // idle teardown first so a quick re-entry keeps the live process.
     private fun requestStart(config: BackendConfig?, forceRestart: Boolean) {
@@ -164,10 +208,36 @@ class BackendService : Service() {
             updateState(BackendState.Error("Model not found"))
             return
         }
+        // Serial enforcement: stop LLM when starting SD
+        if (llmProcess?.isAlive == true) {
+            Log.i(TAG, "Stopping LLM backend before starting SD")
+            stopLlmBackend()
+            llmDesired = null
+            llmIdleStopJob?.cancel()
+        }
         idleStopJob?.cancel()
         idleStopJob = null
         desired = config
         reconcile(forceRestart)
+    }
+
+    // LLM start request
+    private fun requestLlmStart(config: LlmBackendConfig?) {
+        if (config == null) {
+            updateLlmState(BackendState.Error("LLM model not found"))
+            return
+        }
+        // Serial enforcement: stop SD when starting LLM
+        if (process?.isAlive == true) {
+            Log.i(TAG, "Stopping SD backend before starting LLM")
+            stopBackend()
+            desired = null
+            idleStopJob?.cancel()
+        }
+        llmIdleStopJob?.cancel()
+        llmIdleStopJob = null
+        llmDesired = config
+        reconcileLlm()
     }
 
     // Declares that nothing should run, but only tears down after a grace
@@ -175,7 +245,9 @@ class BackendService : Service() {
     // place; otherwise the process is stopped and the Service stops itself.
     private fun requestStop(startId: Int) {
         desired = null
+        llmDesired = null
         idleStopJob?.cancel()
+        llmIdleStopJob?.cancel()
         idleStopJob = serviceScope.launch {
             delay(IDLE_GRACE_MS)
             // A re-entry during the delay normally cancels us. The startId guard
@@ -183,8 +255,9 @@ class BackendService : Service() {
             // raced in just as the grace fired: stopSelfResult() refuses to stop
             // when a newer start exists, leaving the (re)started service alive
             // with its foreground notification intact.
-            if (desired == null) {
+            if (desired == null && llmDesired == null) {
                 stopBackend()
+                stopLlmBackend()
                 if (stopSelfResult(startId)) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                 }
@@ -195,7 +268,7 @@ class BackendService : Service() {
     // Converges the actual process to `desired`. Runs only on the single
     // backend thread, so reading current state and any start/stop are atomic
     // with respect to other commands.
-    private fun reconcile(forceRestart: Boolean) {
+    private fun reconcile(forceRestart: Boolean = false) {
         val want = desired ?: return
         // prepareRuntimeDir runs earlier on this same thread and publishes its
         // own error on failure; if it didn't finish ready, leave that state.
@@ -218,6 +291,29 @@ class BackendService : Service() {
             serving = null
             updateServingModelId(null)
             updateState(BackendState.Error("Backend start failed", want.modelId))
+        }
+    }
+
+    private fun reconcileLlm() {
+        val want = llmDesired ?: return
+        if (!runtimeDirReady) return
+
+        val alreadyServing = llmProcess?.isAlive == true && llmServing == want
+        if (alreadyServing) {
+            Log.i(TAG, "LLM backend already serving ${want.modelId}")
+            updateServingLlmModelId(want.modelId)
+            updateLlmState(BackendState.Running)
+            return
+        }
+        stopLlmBackend()
+        if (startLlmBackend(want)) {
+            llmServing = want
+            updateServingLlmModelId(want.modelId)
+            updateLlmState(BackendState.Running)
+        } else {
+            llmServing = null
+            updateServingLlmModelId(null)
+            updateLlmState(BackendState.Error("LLM backend start failed", want.modelId))
         }
     }
 
@@ -539,6 +635,126 @@ class BackendService : Service() {
     // True when proc is still the tracked process and no intentional stop is in
     // progress, i.e. its exit really is an unexpected crash worth reporting.
     private fun isLiveCrash(proc: Process): Boolean = !stopping && process === proc
+    private fun isLlmLiveCrash(proc: Process): Boolean = !llmStopping && llmProcess === proc
+
+    private fun startLlmBackend(config: LlmBackendConfig): Boolean {
+        Log.i(TAG, "LLM backend start, model: ${config.modelId}")
+        llmStopping = false
+        updateLlmState(BackendState.Starting)
+
+        try {
+            val nativeDir = applicationInfo.nativeLibraryDir
+            val executableFile = File(nativeDir, LLM_EXECUTABLE_NAME)
+
+            if (!executableFile.exists()) {
+                Log.e(TAG, "LLM executable not found: ${executableFile.absolutePath}")
+                return false
+            }
+
+            val htpConfigFile = File(filesDir.parentFile, "assets/htp_config/${config.htpConfig}")
+            // Fallback: copy from assets if not on disk
+            val actualHtpConfig = if (htpConfigFile.exists()) {
+                htpConfigFile.absolutePath
+            } else {
+                // Assets are extracted at install time; try the standard path
+                val assetPath = File(applicationInfo.sourceDir).parentFile?.let {
+                    File(it, "assets/htp_config/${config.htpConfig}")
+                }
+                if (assetPath?.exists() == true) assetPath.absolutePath
+                else config.htpConfig
+            }
+
+            val command = mutableListOf(
+                executableFile.absolutePath,
+                "--model_dir", config.modelDir,
+                "--lib_dir", runtimeDir.absolutePath,
+                "--htp_config", actualHtpConfig,
+                "--port", "8082",
+            )
+
+            val env = mutableMapOf<String, String>()
+            val systemLibPaths = mutableListOf(
+                runtimeDir.absolutePath,
+                "/system/lib64",
+                "/vendor/lib64",
+                "/vendor/lib64/egl",
+            )
+            val systemLibPathsStr = systemLibPaths.joinToString(":")
+            env["LD_LIBRARY_PATH"] = systemLibPathsStr
+            env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+            env["ADSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+
+            Log.d(TAG, "LLM COMMAND: ${command.joinToString(" ")}")
+
+            val processBuilder = ProcessBuilder(command).apply {
+                directory(File(nativeDir))
+                redirectErrorStream(true)
+                environment().putAll(env)
+            }
+
+            val proc = processBuilder.start()
+            llmProcess = proc
+
+            startLlmMonitorThread(proc)
+
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "LLM backend start failed", e)
+            updateLlmState(BackendState.Error("LLM backend start failed: ${e.message}", config.modelId))
+            return false
+        }
+    }
+
+    private fun startLlmMonitorThread(proc: Process) {
+        Thread {
+            val exitCode = try {
+                proc.inputStream.bufferedReader().use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        Log.i(TAG, "LLM: $line")
+                    }
+                }
+                proc.waitFor()
+            } catch (e: Exception) {
+                Log.e(TAG, "LLM monitor error", e)
+                if (isLlmLiveCrash(proc)) {
+                    updateLlmState(BackendState.Error("LLM monitor error: ${e.message}", servingLlmModelId.value))
+                }
+                return@Thread
+            }
+            Log.i(TAG, "LLM process exited with code: $exitCode")
+            if (isLlmLiveCrash(proc)) {
+                updateLlmState(
+                    BackendState.Error("LLM process exited with code: $exitCode", servingLlmModelId.value)
+                )
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun stopLlmBackend() {
+        Log.i(TAG, "to stop LLM backend")
+        llmStopping = true
+        llmProcess?.let { proc ->
+            try {
+                proc.destroy()
+                if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+                    proc.destroyForcibly()
+                }
+                Log.i(TAG, "LLM process end, code: ${proc.exitValue()}")
+                updateLlmState(BackendState.Idle)
+            } catch (e: Exception) {
+                Log.e(TAG, "LLM stop error", e)
+                updateLlmState(BackendState.Error("LLM error: ${e.message}"))
+            } finally {
+                llmProcess = null
+            }
+        }
+        llmServing = null
+        updateServingLlmModelId(null)
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -547,7 +763,9 @@ class BackendService : Service() {
         // thread wind down once the backend process has exited.
         serviceScope.launch {
             idleStopJob?.cancel()
+            llmIdleStopJob?.cancel()
             stopBackend()
+            stopLlmBackend()
             backendDispatcher.close()
         }
     }

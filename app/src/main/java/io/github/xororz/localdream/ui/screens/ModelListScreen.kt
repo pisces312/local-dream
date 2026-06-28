@@ -384,14 +384,19 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
         PinnedModels.sort(modelRepository.models.filter { !it.runOnCpu }, pinnedIds)
     }
 
+    // LLM models
+    val llmRepository = remember { LLMModelRepository.getInstance(context) }
+    LaunchedEffect(Unit) { llmRepository.ensureLoaded() }
+    val llmModels = remember(llmRepository.models) { llmRepository.models }
+
     val lastViewedPage = remember {
         val preferences = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         preferences.getInt("last_viewed_page", 0)
     }
 
     val pagerState = rememberPagerState(
-        initialPage = lastViewedPage,
-        pageCount = { 2 },
+        initialPage = lastViewedPage.coerceAtMost(2),
+        pageCount = { 3 },
     )
 
     LaunchedEffect(pagerState.currentPage) {
@@ -402,6 +407,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     val tabTitles = listOf(
         stringResource(R.string.cpu_models),
         stringResource(R.string.npu_models),
+        stringResource(R.string.llm_models),
     )
 
     if (isSelectionMode) {
@@ -1035,92 +1041,27 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 state = pagerState,
                 modifier = Modifier.weight(1f),
             ) { page ->
-                val models = if (page == 0) cpuModels else npuModels
-
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    if (page == 0) {
-                        item {
-                            AddCustomModelButton(
-                                onClick = { showCustomModelDialog = true },
-                                modifier = Modifier.fillMaxWidth(),
+                if (page == 2) {
+                    // LLM Models page
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(
+                            items = llmModels,
+                            key = { model -> model.id },
+                        ) { model ->
+                            LLMModelCard(
+                                model = model,
+                                onClick = {
+                                    navController.navigate(Screen.LLMRun.createRoute(model.id))
+                                },
                             )
                         }
-                    }
 
-                    if (page == 1 && Model.isQualcommDevice()) {
-                        item {
-                            AddCustomNpuModelButton(
-                                onClick = { showCustomNpuModelDialog = true },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-
-                    items(
-                        items = models,
-                        key = { model -> model.id },
-                    ) { model ->
-                        ModelCard(
-                            model = model,
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = tween(Motion.DurationMedium),
-                                fadeOutSpec = tween(Motion.DurationMedium),
-                                placementSpec = Motion.springExpressiveSpatial(),
-                            ),
-                            isSelected = selectedModels.contains(model),
-                            isSelectionMode = isSelectionMode,
-                            isPinned = model.id in pinnedIds,
-                            onClick = {
-                                if (!Model.isDeviceSupported() && !model.runOnCpu) {
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar(msgUnsupportNpu)
-                                    }
-                                    return@ModelCard
-                                }
-                                if (isSelectionMode) {
-                                    if (model.isDownloaded) {
-                                        selectedModels = if (selectedModels.contains(model)) {
-                                            selectedModels - model
-                                        } else {
-                                            selectedModels + model
-                                        }
-
-                                        if (selectedModels.isEmpty()) {
-                                            isSelectionMode = false
-                                        }
-                                    }
-                                } else {
-                                    if (!model.isDownloaded) {
-                                        showDownloadConfirm = model
-                                    } else {
-                                        navController.navigate(Screen.ModelRun.createRoute(model.id))
-                                    }
-                                }
-                            },
-                            onLongClick = {
-                                if (model.isDownloaded && !isSelectionMode) {
-                                    isSelectionMode = true
-                                    selectedModels = setOf(model)
-                                }
-                            },
-                            onUpdateClick = {
-                                showUpgradeConfirm = model
-                            },
-                        )
-                    }
-
-                    if (models.isEmpty() && modelRepository.isLoaded) {
-                        item {
-                            var visible by remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) { visible = true }
-                            AnimatedVisibility(
-                                visible = visible,
-                                enter = fadeIn(animationSpec = Motion.Fade) + expandVertically(),
-                            ) {
+                        if (llmModels.isEmpty() && llmRepository.isLoaded) {
+                            item {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1135,11 +1076,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Text(
-                                        text = if (page == 0) {
-                                            stringResource(R.string.no_cpu_models)
-                                        } else {
-                                            stringResource(R.string.no_npu_models)
-                                        },
+                                        text = stringResource(R.string.no_llm_models),
                                         style = MaterialTheme.typography.bodyLarge,
                                         textAlign = TextAlign.Center,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1148,6 +1085,122 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             }
                         }
                     }
+                } else {
+                    // CPU/NPU Models page (page 0 and 1)
+                    val models = if (page == 0) cpuModels else npuModels
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (page == 0) {
+                            item {
+                                AddCustomModelButton(
+                                    onClick = { showCustomModelDialog = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+
+                        if (page == 1 && Model.isQualcommDevice()) {
+                            item {
+                                AddCustomNpuModelButton(
+                                    onClick = { showCustomNpuModelDialog = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+
+                        items(
+                            items = models,
+                            key = { model -> model.id },
+                        ) { model ->
+                            ModelCard(
+                                model = model,
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = tween(Motion.DurationMedium),
+                                    fadeOutSpec = tween(Motion.DurationMedium),
+                                    placementSpec = Motion.springExpressiveSpatial(),
+                                ),
+                                isSelected = selectedModels.contains(model),
+                                isSelectionMode = isSelectionMode,
+                                isPinned = model.id in pinnedIds,
+                                onClick = {
+                                    if (!Model.isDeviceSupported() && !model.runOnCpu) {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(msgUnsupportNpu)
+                                        }
+                                        return@ModelCard
+                                    }
+                                    if (isSelectionMode) {
+                                        if (model.isDownloaded) {
+                                            selectedModels = if (selectedModels.contains(model)) {
+                                                selectedModels - model
+                                            } else {
+                                                selectedModels + model
+                                            }
+
+                                            if (selectedModels.isEmpty()) {
+                                                isSelectionMode = false
+                                            }
+                                        }
+                                    } else {
+                                        if (!model.isDownloaded) {
+                                            showDownloadConfirm = model
+                                        } else {
+                                            navController.navigate(Screen.ModelRun.createRoute(model.id))
+                                        }
+                                    }
+                                },
+                                onLongClick = {
+                                    if (model.isDownloaded && !isSelectionMode) {
+                                        isSelectionMode = true
+                                        selectedModels = setOf(model)
+                                    }
+                                },
+                                onUpdateClick = {
+                                    showUpgradeConfirm = model
+                                },
+                            )
+                        }
+
+                        if (models.isEmpty() && modelRepository.isLoaded) {
+                            item {
+                                var visible by remember { mutableStateOf(false) }
+                                LaunchedEffect(Unit) { visible = true }
+                                AnimatedVisibility(
+                                    visible = visible,
+                                    enter = fadeIn(animationSpec = Motion.Fade) + expandVertically(),
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 32.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SearchOff,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(48.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            text = if (page == 0) {
+                                                stringResource(R.string.no_cpu_models)
+                                            } else {
+                                                stringResource(R.string.no_npu_models)
+                                            },
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            textAlign = TextAlign.Center,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                        }
+                    }
+                }
                 }
             }
 
@@ -1158,7 +1211,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 horizontalArrangement = Arrangement.Center,
             ) {
                 TabPageIndicator(
-                    pageCount = 2,
+                    pageCount = 3,
                     currentPage = pagerState.currentPage,
                 )
             }
@@ -4159,6 +4212,56 @@ private fun ThemeSwatch(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun LLMModelCard(
+    model: LLMModel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.SmartToy,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = model.name,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (model.description.isNotEmpty()) {
+                    Text(
+                        text = model.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
