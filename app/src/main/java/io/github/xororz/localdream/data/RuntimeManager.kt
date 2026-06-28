@@ -71,6 +71,8 @@ object RuntimeManager {
         return true
     }
 
+    private const val CORE_SO_NAME = "libstable_diffusion_core.so"
+
     /**
      * Ensures the default runtime directory exists and contains .so files.
      * Creates the directory and copies assets if needed.
@@ -87,7 +89,7 @@ object RuntimeManager {
             flatSoFiles.forEach { it.renameTo(File(defaultDir, it.name)) }
         }
 
-        // Copy assets if default dir is still empty
+        // Copy QNN assets if default dir has no .so files
         val hasSoFiles = defaultDir.listFiles()?.any { it.name.endsWith(".so") } == true
         if (!hasSoFiles) {
             try {
@@ -99,6 +101,15 @@ object RuntimeManager {
                     }
                 }
             } catch (_: Exception) { }
+        }
+
+        // Copy libstable_diffusion_core.so from nativeLibraryDir
+        val coreInRuntime = File(defaultDir, CORE_SO_NAME)
+        if (!coreInRuntime.exists()) {
+            val coreInNative = File(context.applicationInfo.nativeLibraryDir, CORE_SO_NAME)
+            if (coreInNative.exists()) {
+                coreInNative.copyTo(coreInRuntime, overwrite = true)
+            }
         }
     }
 }

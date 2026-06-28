@@ -2185,7 +2185,7 @@ private enum class FileType(val icon: ImageVector, val canDelete: Boolean, val c
     TEMP(Icons.Default.DeleteSweep, true, true, false),
     RUNTIME(Icons.Default.Memory, false, false, true),
     SAFETY(Icons.Default.Security, false, false, true),
-    OTHER(Icons.Default.InsertDriveFile, true, true, false)
+    OTHER(Icons.AutoMirrored.Filled.InsertDriveFile, true, true, false)
 }
 
 private fun classifyFile(file: File): FileType = when (file.name) {
@@ -2304,10 +2304,23 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                         val fileToDelete = showDeleteConfirm!!
                         showDeleteConfirm = null
                         scope.launch {
-                            val deleted = withContext(Dispatchers.IO) { fileToDelete.delete() }
+                            val deleted = withContext(Dispatchers.IO) {
+                                if (fileToDelete.isDirectory) fileToDelete.deleteRecursively()
+                                else fileToDelete.delete()
+                            }
                             if (deleted) {
                                 onFileDeleted()
-                                selectedFolder?.let { loadFilesForFolder(context, it) }
+                                if (selectedSubFolder != null) {
+                                    val parent = File(context.filesDir, "$selectedFolder/$selectedSubFolder")
+                                    folderFiles = withContext(Dispatchers.IO) {
+                                        parent.listFiles()?.toList() ?: emptyList()
+                                    }
+                                } else {
+                                    selectedFolder?.let {
+                                        val (_, _, files) = loadFilesForFolder(context, it)
+                                        folderFiles = files
+                                    }
+                                }
                                 topItems = loadTopItems(context)
                             }
                         }
@@ -2468,14 +2481,19 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                             }
                         }
                     }
-                    IconButton(
+                    TextButton(
                         onClick = { runtimeImportLauncher.launch(null) },
-                        modifier = Modifier.size(24.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Default.CreateNewFolder,
-                            contentDescription = stringResource(R.string.runtime_import_folder),
-                            modifier = Modifier.size(20.dp),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = stringResource(R.string.runtime_import_folder),
+                            style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 }
@@ -2803,8 +2821,6 @@ private suspend fun exportFilesToUri(
         val destDir = folderName?.let { name ->
             treeDoc.findFile(name) ?: treeDoc.createDirectory(name)
         } ?: treeDoc
-        destDir ?: return@withContext false
-
         files.forEach { file ->
             if (file.isDirectory) {
                 val subDir = destDir.findFile(file.name) ?: destDir.createDirectory(file.name)

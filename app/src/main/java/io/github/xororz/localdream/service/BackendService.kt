@@ -352,7 +352,9 @@ class BackendService : Service() {
             }.getOrNull()
             val modelsDir = File(Model.getModelsDir(this, customPath), modelId)
 
-            val executableFile = File(nativeDir, EXECUTABLE_NAME)
+            val coreInRuntime = File(resolvedRuntimeDir, EXECUTABLE_NAME)
+            val executableFile = if (coreInRuntime.exists()) coreInRuntime
+                                 else File(nativeDir, EXECUTABLE_NAME)
 
             if (!executableFile.exists()) {
                 Log.e(TAG, "error: executable does not exist: ${executableFile.absolutePath}")

@@ -433,4 +433,10 @@
     <string name="clean_temp_confirm">清理 %s 临时文件（中断的下载和临时缓冲）？</string>
     <string name="clean_temp_none">没有可清理的临时文件</string>
     <string name="clean_temp_done">已释放 %s</string>
+
+    <!-- Runtime -->
+    <string name="runtime_lib">运行时库</string>
+    <string name="runtime_import_folder">导入运行时文件夹</string>
+    <string name="runtime_import_success">运行时导入成功</string>
+    <string name="runtime_import_exists">同名运行时已存在</string>
 </resources>
