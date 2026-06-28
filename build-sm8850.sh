@@ -57,7 +57,10 @@ if [[ "$BUILD_TYPE" == "release" ]]; then
         SOURCE_APK=$(ls "$BUILD_DIR"/*.apk 2>/dev/null | head -1)
     fi
 else
-    SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}.apk"
+    SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}_debug.apk"
+    if [[ ! -f "$SOURCE_APK" ]]; then
+        SOURCE_APK="$BUILD_DIR/LocalDream_armv8a_${VERSION}.apk"
+    fi
     if [[ ! -f "$SOURCE_APK" ]]; then
         SOURCE_APK=$(ls "$BUILD_DIR"/*.apk 2>/dev/null | head -1)
     fi
@@ -101,41 +104,36 @@ print(f'  Removed {removed} QNN lib entries')
 APK_SIZE_AFTER=$(du -h "$SOURCE_APK" | cut -f1)
 echo "  APK after:  $APK_SIZE_AFTER"
 
-# ─── Step 4: Sign (release) or copy (debug) ───
+# ─── Step 4: Align + Sign ───
+# After stripping QNN libs the original signature is invalid, so ALL builds
+# (debug & release) must go through zipalign + apksigner.
 OUTPUT_APK=""
+BUILD_TOOLS="${ANDROID_SDK_ROOT:-D:/dev/android_sdk}/build-tools/34.0.0"
+ALIGNED_APK="$BUILD_DIR/aligned.apk"
+
 if [[ "$BUILD_TYPE" == "release" ]]; then
-    KEYSTORE="${KEY_STORE:-}"
-    KEYSTORE_PASS="${KEY_STORE_PASSWORD:-}"
-    KEY_ALIAS="${KEY_ALIAS:-pisces312}"
-
-    if [[ -z "$KEYSTORE" ]] || [[ -z "$KEYSTORE_PASS" ]]; then
-        echo "WARNING: Signing config not set (KEY_STORE / KEY_STORE_PASSWORD env vars)"
-        echo "  Copying unsigned APK instead"
-        OUTPUT_APK="$PROJECT_DIR/LocalDream_armv8a_${VERSION}-${FLAVOR}-sm8850-unsigned.apk"
-        cp -f "$SOURCE_APK" "$OUTPUT_APK"
-    else
-        BUILD_TOOLS="${ANDROID_SDK_ROOT:-D:/dev/android_sdk}/build-tools/34.0.0"
-        ALIGNED_APK="$BUILD_DIR/release-aligned.apk"
-        OUTPUT_APK="$PROJECT_DIR/LocalDream_armv8a_${VERSION}-${FLAVOR}-sm8850-signed.apk"
-
-        echo "=== Aligning ==="
-        "$BUILD_TOOLS/zipalign" -f 4 "$SOURCE_APK" "$ALIGNED_APK"
-
-        echo "=== Signing ==="
-        java -jar "$BUILD_TOOLS/lib/apksigner.jar" sign \
-            --ks "$KEYSTORE" \
-            --ks-pass "pass:$KEYSTORE_PASS" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass "pass:$KEYSTORE_PASS" \
-            --out "$OUTPUT_APK" \
-            "$ALIGNED_APK"
-
-        rm -f "$ALIGNED_APK"
-    fi
+    OUTPUT_APK="$PROJECT_DIR/LocalDream_armv8a_${VERSION}-${FLAVOR}-sm8850-signed.apk"
 else
     OUTPUT_APK="$PROJECT_DIR/LocalDream_armv8a_${VERSION}-${FLAVOR}-sm8850-debug.apk"
-    cp -f "$SOURCE_APK" "$OUTPUT_APK"
 fi
+
+KEYSTORE="${KEY_STORE:-}"
+KEYSTORE_PASS="${KEY_STORE_PASSWORD:-}"
+KEY_ALIAS="${KEY_ALIAS:-pisces312}"
+
+echo "=== Aligning ==="
+"$BUILD_TOOLS/zipalign" -f 4 "$SOURCE_APK" "$ALIGNED_APK"
+
+echo "=== Signing ==="
+java -jar "$BUILD_TOOLS/lib/apksigner.jar" sign \
+    --ks "$KEYSTORE" \
+    --ks-pass "pass:$KEYSTORE_PASS" \
+    --ks-key-alias "$KEY_ALIAS" \
+    --key-pass "pass:$KEYSTORE_PASS" \
+    --out "$OUTPUT_APK" \
+    "$ALIGNED_APK"
+
+rm -f "$ALIGNED_APK"
 
 SIZE=$(du -h "$OUTPUT_APK" | cut -f1)
 echo "=== Done: $OUTPUT_APK ($SIZE) ==="
