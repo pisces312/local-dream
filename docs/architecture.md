@@ -235,9 +235,35 @@ Ultrafix 是一种 PixelRush 风格的 tiled img2img 策略，用于对大尺寸
 
 ---
 
-## 5. Privacy & Security
+## 5. QNN Runtime 管理
 
-### 5.1 Report Image (已禁用)
+### 5.1 目录结构
+
+```
+filesDir/runtime_libs/
+├── default/        ← APK assets 自动复制（App 启动时）
+└── <name>/         ← 用户通过文件管理器导入
+```
+
+所有 runtime .so 必须在内部存储（`filesDir`），Android 禁止从外部存储 `dlopen`。
+
+### 5.2 Runtime 选择
+
+- 每个模型独立存储 runtime 偏好（`GenerationPreferences`）
+- NPU 模型在 Advanced Settings 中显示 runtime 下拉菜单
+- 切换模型时后端进程自动重启，使用对应 runtime 的 `--lib_dir`
+
+### 5.3 QNN 版本兼容性
+
+`libstable_diffusion_core.so` 版本决定所需 QNN runtime 版本，向下不兼容。QNN 版本对速度影响不大，差异主要来自生成参数。
+
+详见 `docs/android-dlopen-limitation.md`。
+
+---
+
+## 6. Privacy & Security
+
+### 6.1 Report Image (已禁用)
 
 官方版本中，`ImageUtils.kt` 的 `reportImage()` 会将生成的图片和参数上报到 `report.chino.icu`。
 
@@ -245,7 +271,7 @@ Ultrafix 是一种 PixelRush 风格的 tiled img2img 策略，用于对大尺寸
 -   `reportImage()` 函数体已替换为空操作 (no-op)。
 -   `reportClient` 字段已移除。
 
-### 5.2 Safety Checker
+### 6.2 Safety Checker
 
 -   可选的 NSFW 内容检测模型 (MNN 格式)。
 -   仅 `filter` build variant 默认包含 `safety_checker.mnn`。
@@ -255,16 +281,16 @@ Ultrafix 是一种 PixelRush 风格的 tiled img2img 策略，用于对大尺寸
 
 ---
 
-## 6. Build & Distribution
+## 7. Build & Distribution
 
-### 6.1 Build Variants
+### 7.1 Build Variants
 
 | Variant | Suffix            | Safety Checker | APK Size (approx) |
 |---------|-------------------|----------------|-------------------|
 | `basic` | (none)            | ✗              | ~56 MB (official) / ~127 MB (fork, 含 .so) |
 | `filter`| `_with_filter`    | ✓              | ~67 MB (official) |
 
-### 6.2 Release Signing
+### 7.2 Release Signing
 
 Release 构建需要签名配置。在 `gradle.properties` 中设置：
 
@@ -277,7 +303,7 @@ RELEASE_KEY_PASSWORD=your_key_password
 
 或将 `keystore.jks` 放在 `app/` 目录下。
 
-### 6.3 C++ Backend Rebuild
+### 7.3 C++ Backend Rebuild
 
 **当前状态：** `libstable_diffusion_core.so` 从官方 APK 提取，非从源码编译。
 
@@ -297,7 +323,7 @@ RELEASE_KEY_PASSWORD=your_key_password
 
 ---
 
-## 7. UI Screens
+## 8. UI Screens
 
 | Screen          | Route                | 功能                          |
 |-----------------|----------------------|-------------------------------|
@@ -318,4 +344,4 @@ RELEASE_KEY_PASSWORD=your_key_password
 
 ---
 
-*Last updated: 2026-06-17*
+*Last updated: 2026-06-28*

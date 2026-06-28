@@ -18,7 +18,11 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +36,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -49,7 +55,7 @@ import kotlin.math.roundToInt
  * state mutation is routed back through callbacks so the screen keeps ownership
  * of parameter state and persistence.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun AdvancedSettingsDialog(
     isSdxl: Boolean,
@@ -85,6 +91,9 @@ internal fun AdvancedSettingsDialog(
     onShare: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
+    runtimeDir: String? = null,
+    availableRuntimes: List<io.github.xororz.localdream.data.RuntimeDir> = emptyList(),
+    onRuntimeDirChange: (String?) -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -440,6 +449,51 @@ internal fun AdvancedSettingsDialog(
                                     returnedSeed.toString(),
                                 ),
                             )
+                        }
+                    }
+
+                    // Runtime selection for NPU models
+                    if (!runOnCpu && availableRuntimes.isNotEmpty()) {
+                        val runtimeExpanded = remember { mutableStateOf(false) }
+                        androidx.compose.material3.ExposedDropdownMenuBox(
+                            expanded = runtimeExpanded.value,
+                            onExpandedChange = { runtimeExpanded.value = it },
+                        ) {
+                            OutlinedTextField(
+                                value = runtimeDir ?: io.github.xororz.localdream.data.RuntimeManager.DEFAULT_SUBDIR,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.runtime_lib)) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = runtimeExpanded.value) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = runtimeExpanded.value,
+                                onDismissRequest = { runtimeExpanded.value = false },
+                            ) {
+                                availableRuntimes.forEach { rt ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(rt.name)
+                                                if (rt.soFiles.isNotEmpty()) {
+                                                    Text(
+                                                        rt.soFiles.joinToString(", "),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            onRuntimeDirChange(rt.name)
+                                            runtimeExpanded.value = false
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }

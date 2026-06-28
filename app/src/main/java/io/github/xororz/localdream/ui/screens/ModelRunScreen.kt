@@ -136,6 +136,7 @@ import io.github.xororz.localdream.data.HistoryFilter
 import io.github.xororz.localdream.data.HistoryItem
 import io.github.xororz.localdream.data.HistoryManager
 import io.github.xororz.localdream.data.ModelRepository
+import io.github.xororz.localdream.data.RuntimeManager
 import io.github.xororz.localdream.data.PatchScanner
 import io.github.xororz.localdream.data.Resolution
 import io.github.xororz.localdream.data.TagAutocompleteRepository
@@ -305,6 +306,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     var batchCounts by remember { mutableIntStateOf(GenerationDefaults.GLOBAL.batchCounts) }
     var scheduler by remember { mutableStateOf(GenerationDefaults.GLOBAL.scheduler) }
     var aspectRatio by remember { mutableStateOf(GenerationDefaults.GLOBAL.aspectRatio) }
+    var runtimeDir by remember { mutableStateOf<String?>(null) }
     var showCustomAspectRatioDialog by remember { mutableStateOf(false) }
     var currentBatchIndex by remember { mutableIntStateOf(0) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -533,6 +535,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 batchCounts = batchCounts,
                 scheduler = scheduler,
                 aspectRatio = aspectRatio,
+                runtimeDir = runtimeDir,
             )
         }
     }
@@ -853,6 +856,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             denoiseStrength = ultrafixDenoiseStrength,
             useOpenCL = false,
             scheduler = scheduler,
+            runtimeDir = runtimeDir,
         )
         batchGenerationJob = coroutineScope.launch {
             // The progress card lives on the prompt page; bring it into view.
@@ -1137,6 +1141,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             useOpenCL = prefs.useOpenCL
             batchCounts = prefs.batchCounts
             scheduler = if (isFirstRun) defaults.scheduler else prefs.scheduler
+            runtimeDir = prefs.runtimeDir
             // Without img2img the backend has no VAE encoder, so a stored
             // non-1:1 ratio would silently fall back to 1024x1024 anyway.
             aspectRatio = if (useImg2img) prefs.aspectRatio else "1:1"
@@ -1172,6 +1177,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 putExtra("width", currentWidth)
                 putExtra("height", currentHeight)
                 putExtra("use_opencl", useOpenCL)
+                putExtra("runtimeDirName", runtimeDir)
             }
             context.startForegroundService(intent)
         }
@@ -1273,6 +1279,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         useOpenCL = generationParamsTmp.useOpenCL,
                         scheduler = generationParamsTmp.scheduler,
                         mode = currentGenerationMode,
+                        runtimeDir = generationParamsTmp.runtimeDir,
                     )
 
                     // Save to disk and update history list. The saved item's id is
@@ -1610,6 +1617,12 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                 }
                             }
                             if (showAdvancedSettings) {
+                                var availableRuntimes by remember {
+                                    mutableStateOf(RuntimeManager.listAvailableRuntimes(context))
+                                }
+                                LaunchedEffect(Unit) {
+                                    availableRuntimes = RuntimeManager.listAvailableRuntimes(context)
+                                }
                                 AdvancedSettingsDialog(
                                     isSdxl = model?.isSdxl == true,
                                     runOnCpu = model?.runOnCpu ?: false,
@@ -1627,6 +1640,12 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     denoiseStrength = denoiseStrength,
                                     seed = seed,
                                     returnedSeed = returnedSeed,
+                                    runtimeDir = runtimeDir,
+                                    availableRuntimes = availableRuntimes,
+                                    onRuntimeDirChange = { value ->
+                                        runtimeDir = value
+                                        saveAllFields()
+                                    },
                                     onAspectRatioSelected = { ratio ->
                                         if (!isRunning && aspectRatio != ratio) {
                                             aspectRatio = ratio
@@ -1711,6 +1730,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                             useOpenCL = useOpenCL,
                                             scheduler = scheduler,
                                             mode = currentMode,
+                                            runtimeDir = runtimeDir,
                                         )
                                         shareSourceModelId = modelId
                                     },
@@ -1769,6 +1789,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     denoiseStrength = denoiseStrength,
                                     useOpenCL = useOpenCL,
                                     scheduler = scheduler,
+                                    runtimeDir = runtimeDir,
                                 )
 
                                 Log.d(
@@ -1803,6 +1824,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                             denoiseStrength = denoiseStrength,
                                             useOpenCL = useOpenCL,
                                             scheduler = scheduler,
+                                            runtimeDir = runtimeDir,
                                         )
 
                                         val batchIntent = Intent(

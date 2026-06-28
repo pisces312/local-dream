@@ -355,6 +355,10 @@
     <string name="aspect_ratio_custom_hint">Enter two positive integers (e.g. 21 9)</string>
     <string name="aspect_ratio_invalid">Invalid ratio. Must be two positive integers.</string>
     <string name="scheduler">Scheduler</string>
+    <string name="runtime_lib">Runtime Library</string>
+    <string name="runtime_import_folder">Import Runtime Folder</string>
+    <string name="runtime_import_success">Runtime \"%s\" imported successfully</string>
+    <string name="runtime_import_exists">Runtime \"%s\" already exists</string>
     <string name="extracting">Extracting…</string>
 
     <!-- History migration -->

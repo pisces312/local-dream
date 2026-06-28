@@ -2227,6 +2227,7 @@ private suspend fun loadFilesForFolder(context: Context, folderName: String): Tr
 private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDeleted: () -> Unit) {
     var topItems by remember { mutableStateOf<List<TopLevelItem>>(emptyList()) }
     var selectedFolder by remember { mutableStateOf<String?>(null) }
+    var selectedSubFolder by remember { mutableStateOf<String?>(null) }
     var folderFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var showDeleteConfirm by remember { mutableStateOf<File?>(null) }
     var showDeleteWarning by remember { mutableStateOf<File?>(null) }
@@ -2397,7 +2398,19 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
             ) {
                 if (selectedFolder != null) {
                     IconButton(
-                        onClick = { selectedFolder = null },
+                        onClick = {
+                            if (selectedSubFolder != null) {
+                                selectedSubFolder = null
+                                scope.launch {
+                                    val (cd, size, files) = loadFilesForFolder(context, selectedFolder!!)
+                                    cacheDir = cd
+                                    cacheSize = size
+                                    folderFiles = files
+                                }
+                            } else {
+                                selectedFolder = null
+                            }
+                        },
                         modifier = Modifier.size(24.dp),
                     ) {
                         Icon(
@@ -2408,9 +2421,11 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                     }
                 }
                 Text(
-                    text = selectedFolder?.let {
-                        stringResource(R.string.model_folder, it)
-                    } ?: stringResource(R.string.file_manager),
+                    text = when {
+                        selectedSubFolder != null -> stringResource(R.string.model_folder, "$selectedFolder/$selectedSubFolder")
+                        selectedFolder != null -> stringResource(R.string.model_folder, selectedFolder!!)
+                        else -> stringResource(R.string.file_manager)
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 if (selectedFolder == null) {
@@ -2421,6 +2436,45 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                         Icon(
                             imageVector = Icons.Default.Download,
                             contentDescription = stringResource(R.string.import_file),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                if (selectedFolder == "runtime_libs") {
+                    val runtimeImportLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocumentTree()
+                    ) { uri ->
+                        if (uri != null) {
+                            val docFile = DocumentFile.fromTreeUri(context, uri)
+                            val dirName = docFile?.name ?: return@rememberLauncherForActivityResult
+                            scope.launch {
+                                val success = withContext(Dispatchers.IO) {
+                                    val sourceDir = resolveFsPathFromUri(context, uri)?.let { File(it) }
+                                    if (sourceDir != null && sourceDir.isDirectory) {
+                                        RuntimeManager.importRuntimeDir(context, sourceDir)
+                                    } else {
+                                        false
+                                    }
+                                }
+                                val message = if (success) {
+                                    context.getString(R.string.runtime_import_success, dirName)
+                                } else {
+                                    context.getString(R.string.runtime_import_exists, dirName)
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                if (success) {
+                                    folderFiles = loadFilesForFolder(context, "runtime_libs").third
+                                }
+                            }
+                        }
+                    }
+                    IconButton(
+                        onClick = { runtimeImportLauncher.launch(null) },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = stringResource(R.string.runtime_import_folder),
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -2484,10 +2538,16 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                                     onClick = {
                                         if (item.isDirectory) {
                                             selectedFolder = item.name
+                                            selectedSubFolder = null
                                             folderFiles = emptyList()
                                             cacheDir = null
                                             cacheSize = 0L
                                             scope.launch {
+                                                if (item.name == "runtime_libs") {
+                                                    withContext(Dispatchers.IO) {
+                                                        RuntimeManager.ensureDefaultRuntime(context)
+                                                    }
+                                                }
                                                 val (cd, size, files) = loadFilesForFolder(context, item.name)
                                                 cacheDir = cd
                                                 cacheSize = size
@@ -2610,6 +2670,18 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                         ) {
                             items(folderFiles) { file ->
                                 Card(
+                                    onClick = {
+                                        if (file.isDirectory) {
+                                            selectedSubFolder = file.name
+                                            folderFiles = emptyList()
+                                            scope.launch {
+                                                val files = withContext(Dispatchers.IO) {
+                                                    file.listFiles()?.toList() ?: emptyList()
+                                                }
+                                                folderFiles = files
+                                            }
+                                        }
+                                    },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

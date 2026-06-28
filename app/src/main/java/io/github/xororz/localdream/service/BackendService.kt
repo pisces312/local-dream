@@ -9,6 +9,7 @@ import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
+import io.github.xororz.localdream.data.RuntimeManager
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -114,6 +115,7 @@ class BackendService : Service() {
         val backendType: String,
         val width: Int,
         val height: Int,
+        val runtimeDirName: String? = null,
     )
 
     override fun onCreate() {
@@ -154,7 +156,8 @@ class BackendService : Service() {
         val backendType = intent.getStringExtra("backendType") ?: return null
         val width = intent.getIntExtra("width", 512)
         val height = intent.getIntExtra("height", 512)
-        return BackendConfig(modelId, backendType, width, height)
+        val runtimeDirName = intent.getStringExtra("runtimeDirName")
+        return BackendConfig(modelId, backendType, width, height, runtimeDirName)
     }
 
     // Declares the desired backend and converges to it. Cancels any pending
@@ -280,42 +283,13 @@ class BackendService : Service() {
 
     private fun prepareRuntimeDir() {
         try {
-            runtimeDir = File(filesDir, RUNTIME_DIR).apply {
-                if (!exists()) {
-                    mkdirs()
-                }
+            RuntimeManager.ensureDefaultRuntime(this)
+            runtimeDir = RuntimeManager.getRuntimeDir(this, RuntimeManager.DEFAULT_SUBDIR)
+            runtimeDir.listFiles()?.filter { it.name.endsWith(".so") }?.forEach {
+                it.setReadable(true, true)
+                it.setExecutable(true, true)
             }
-
-            try {
-                val qnnlibsAssets = assets.list("qnnlibs")
-                qnnlibsAssets?.forEach { fileName ->
-                    val targetLib = File(runtimeDir, fileName)
-
-                    val needsCopy = !targetLib.exists() ||
-                        run {
-                            val assetInputStream = assets.open("qnnlibs/$fileName")
-                            val assetSize = assetInputStream.use { it.available().toLong() }
-                            targetLib.length() != assetSize
-                        }
-
-                    if (needsCopy) {
-                        val assetInputStream = assets.open("qnnlibs/$fileName")
-                        assetInputStream.use { input ->
-                            targetLib.outputStream().use { output ->
-                                input.copyTo(output)
-                            }
-                        }
-                        Log.d(TAG, "Copied $fileName from assets to runtime directory")
-                    }
-
-                    targetLib.setReadable(true, true)
-                    targetLib.setExecutable(true, true)
-                }
-                Log.i(TAG, "QNN libraries prepared in runtime directory")
-            } catch (e: IOException) {
-                Log.e(TAG, "Failed to prepare QNN libraries from assets", e)
-                throw RuntimeException("Failed to prepare QNN libraries from assets", e)
-            }
+            Log.i(TAG, "QNN libraries prepared in runtime directory")
 
             if (BuildConfig.FLAVOR == "filter") {
                 try {
@@ -348,8 +322,8 @@ class BackendService : Service() {
             runtimeDir.setExecutable(true, true)
             runtimeDirReady = true
 
-            Log.i(TAG, "Runtime directory prepared: ${runtimeDir.absolutePath}")
-            Log.i(TAG, "Runtime files: ${runtimeDir.list()?.joinToString()}")
+            Log.i(TAG, "Default runtime dir: ${runtimeDir.absolutePath}")
+            Log.i(TAG, "Available runtimes: ${RuntimeManager.listAvailableRuntimes(this).map { it.name }}")
         } catch (e: Exception) {
             Log.e(TAG, "Prepare runtime dir failed", e)
             updateState(BackendState.Error("Prepare runtime dir failed: ${e.message}"))
@@ -361,7 +335,8 @@ class BackendService : Service() {
         val backendType = config.backendType
         val width = config.width
         val height = config.height
-        Log.i(TAG, "backend start, model: $modelId, resolution: $width×$height")
+        val resolvedRuntimeDir = RuntimeManager.getRuntimeDir(this, config.runtimeDirName)
+        Log.i(TAG, "backend start, model: $modelId, resolution: $width×$height, runtime: ${resolvedRuntimeDir.name}")
 
         // reconcile() has already stopped any previous process; just re-arm
         // crash reporting for the process we are about to start.
@@ -398,7 +373,7 @@ class BackendService : Service() {
                 "8081",
             )
             if (backendType != "sd15cpu") {
-                command += listOf("--lib_dir", runtimeDir.absolutePath)
+                command += listOf("--lib_dir", resolvedRuntimeDir.absolutePath)
             }
             if (!useImg2img) {
                 command += "--no_img2img"
@@ -443,7 +418,7 @@ class BackendService : Service() {
             val env = mutableMapOf<String, String>()
 
             val systemLibPaths = mutableListOf(
-                runtimeDir.absolutePath,
+                resolvedRuntimeDir.absolutePath,
                 "/system/lib64",
                 "/vendor/lib64",
                 "/vendor/lib64/egl",
@@ -473,10 +448,10 @@ class BackendService : Service() {
             }
             val systemLibPathsStr = systemLibPaths.joinToString(":")
             env["LD_LIBRARY_PATH"] = systemLibPathsStr
-            env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+            env["DSP_LIBRARY_PATH"] = resolvedRuntimeDir.absolutePath
 
             Log.d(TAG, "COMMAND: ${command.joinToString(" ")}")
-            Log.d(TAG, "DIR: $runtimeDir")
+            Log.d(TAG, "DIR: $resolvedRuntimeDir")
             Log.d(TAG, "LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}")
             Log.d(TAG, "DSP_LIBRARY_PATH=${env["DSP_LIBRARY_PATH"]}")
 

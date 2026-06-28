@@ -29,6 +29,7 @@ class GenerationPreferences(private val context: Context) {
     private fun getBatchCountsKey(modelId: String) = intPreferencesKey("${modelId}_batch_counts")
     private fun getSchedulerKey(modelId: String) = stringPreferencesKey("${modelId}_scheduler")
     private fun getAspectRatioKey(modelId: String) = stringPreferencesKey("${modelId}_aspect_ratio")
+    private fun getRuntimeDirKey(modelId: String) = stringPreferencesKey("${modelId}_runtime_dir")
 
     private val BASE_URL_KEY = stringPreferencesKey("base_url")
     private val SELECTED_SOURCE_KEY = stringPreferencesKey("selected_source")
@@ -140,6 +141,7 @@ class GenerationPreferences(private val context: Context) {
         batchCounts: Int,
         scheduler: String,
         aspectRatio: String = "1:1",
+        runtimeDir: String? = null,
     ) {
         context.dataStore.edit { preferences ->
             preferences[getPromptKey(modelId)] = prompt
@@ -154,6 +156,11 @@ class GenerationPreferences(private val context: Context) {
             preferences[getBatchCountsKey(modelId)] = batchCounts
             preferences[getSchedulerKey(modelId)] = scheduler
             preferences[getAspectRatioKey(modelId)] = aspectRatio
+            if (runtimeDir != null) {
+                preferences[getRuntimeDirKey(modelId)] = runtimeDir
+            } else {
+                preferences.remove(getRuntimeDirKey(modelId))
+            }
         }
     }
 
@@ -188,6 +195,7 @@ class GenerationPreferences(private val context: Context) {
                 batchCounts = preferences[getBatchCountsKey(modelId)] ?: global.batchCounts,
                 scheduler = preferences[getSchedulerKey(modelId)] ?: global.scheduler,
                 aspectRatio = preferences[getAspectRatioKey(modelId)] ?: global.aspectRatio,
+                runtimeDir = preferences[getRuntimeDirKey(modelId)],
             )
         }
 
@@ -240,6 +248,7 @@ class GenerationPreferences(private val context: Context) {
             preferences.remove(getBatchCountsKey(modelId))
             preferences.remove(getSchedulerKey(modelId))
             preferences.remove(getAspectRatioKey(modelId))
+            preferences.remove(getRuntimeDirKey(modelId))
             preferences.remove(getUltrafixStepsKey(modelId))
             preferences.remove(getUltrafixDenoiseStepsKey(modelId))
         }
@@ -263,4 +272,5 @@ data class GenerationPrefs(
     val batchCounts: Int = GenerationDefaults.GLOBAL.batchCounts,
     val scheduler: String = GenerationDefaults.GLOBAL.scheduler,
     val aspectRatio: String = GenerationDefaults.GLOBAL.aspectRatio,
+    val runtimeDir: String? = null,
 )

@@ -20,3 +20,6 @@ app/filter
 # Build outputs at project root
 *.apk
 *.idsig
+
+# Extra runtime libraries (not compiled into APK)
+extra/

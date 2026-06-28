@@ -306,7 +306,7 @@ private fun StorageRadioRow(
  * Returns null if the path cannot be determined (the caller should reject
  * the selection and show a toast).
  */
-private fun resolveFsPathFromUri(context: Context, uri: Uri): String? {
+internal fun resolveFsPathFromUri(context: Context, uri: Uri): String? {
     // Common content URIs from external storage
     val docId = android.provider.DocumentsContract.getTreeDocumentId(uri)
     // docId is like "primary:Android/media/..." or "home:..."

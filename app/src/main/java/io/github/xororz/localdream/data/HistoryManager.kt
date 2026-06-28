@@ -56,6 +56,7 @@ data class HistoryItem(
                     useOpenCL = e.useOpenCL,
                     scheduler = e.scheduler,
                     mode = mode,
+                    runtimeDir = e.runtimeDir,
                 ),
             )
         }
@@ -129,6 +130,7 @@ class HistoryManager(private val context: Context) {
                 scheduler = params.scheduler,
                 runOnCpu = params.runOnCpu,
                 useOpenCL = params.useOpenCL,
+                runtimeDir = params.runtimeDir,
             )
             val id = dao.insert(entity)
             HistoryItem.fromEntity(filesDir, entity.copy(id = id))
