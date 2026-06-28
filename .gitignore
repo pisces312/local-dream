@@ -23,3 +23,6 @@ app/filter
 
 # Extra runtime libraries (not compiled into APK)
 extra/
+
+.workbuddy
+.claude
