@@ -123,15 +123,24 @@ data class Model(
     val runOnCpu: Boolean = false,
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
+    val isAnima: Boolean = false,
 
 ) {
     // Per-field priority: code defaults > config.json > global defaults.
     val defaults: GenerationDefaults
         get() = codeDefaults.withFallback(configDefaults).resolve()
 
+    // SDXL and Anima both render on a fixed 1024 canvas and reach non-1:1
+    // outputs via aspect-ratio inpaint padding; the run screen treats them
+    // alike for default size and aspect-ratio handling (ultrafix stays
+    // SDXL-only). SD1.5 NPU/CPU use their own sizes / resolution patches.
+    val usesFixedCanvas: Boolean
+        get() = isSdxl || isAnima
+
     // Backend --type value; each type implies the full model file layout.
     val backendType: String
         get() = when {
+            isAnima -> "anima"
             isSdxl -> "sdxl"
             runOnCpu -> "sd15cpu"
             else -> "sd15npu"
@@ -452,8 +461,12 @@ class ModelRepository private constructor(private val context: Context) {
                 val finishedFile = File(dir, "finished")
                 val npuCustomFile = File(dir, "npucustom")
                 val sdxlFile = File(dir, "SDXL")
+                val animaFile = File(dir, "ANIMA")
 
                 when {
+                    animaFile.exists() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, isAnima = true))
+
                     sdxlFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = true, isSdxl = true))
 
@@ -469,7 +482,7 @@ class ModelRepository private constructor(private val context: Context) {
         return customModels.sortedBy { it.name.lowercase() }
     }
 
-    private fun createCustomModel(modelDir: File, isNpu: Boolean = false, isSdxl: Boolean = false): Model {
+    private fun createCustomModel(modelDir: File, isNpu: Boolean = false, isSdxl: Boolean = false, isAnima: Boolean = false): Model {
         val modelId = modelDir.name
         // Imported models have no code-level defaults: config.json (if
         // bundled in the zip) wins, the generic placeholder prompts below
@@ -485,13 +498,14 @@ class ModelRepository private constructor(private val context: Context) {
             name = modelId,
             description = context.getString(R.string.custom_model),
             baseUrl = "",
-            generationSize = if (isSdxl) 1024 else 512,
+            generationSize = if (isSdxl || isAnima) 1024 else 512,
             approximateSize = "Custom",
             isDownloaded = true,
             configDefaults = config.withFallback(placeholders),
             runOnCpu = !isNpu,
             isCustom = true,
             isSdxl = isSdxl,
+            isAnima = isAnima,
         )
     }
 

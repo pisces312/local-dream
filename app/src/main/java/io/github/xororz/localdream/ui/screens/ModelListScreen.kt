@@ -1479,6 +1479,22 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         },
                                     )
                                 }
+                                var animaLowRam by remember {
+                                    mutableStateOf(
+                                        preferences.getBoolean("anima_lowram", true).also {
+                                            if (!preferences.contains("anima_lowram")) {
+                                                preferences.edit {
+                                                    putBoolean("anima_lowram", true)
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                                var animaSeqDit by remember {
+                                    mutableStateOf(
+                                        preferences.getBoolean("anima_seq_dit", false),
+                                    )
+                                }
 
                                 SwitchSettingRow(
                                     title = "img2img",
@@ -1705,6 +1721,36 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         preferences.edit { putBoolean("sdxl_lowram", it) }
                                     },
                                 )
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                SwitchSettingRow(
+                                    title = stringResource(R.string.anima_lowram),
+                                    description = stringResource(R.string.anima_lowram_hint),
+                                    checked = animaLowRam,
+                                    onCheckedChange = {
+                                        animaLowRam = it
+                                        preferences.edit { putBoolean("anima_lowram", it) }
+                                    },
+                                )
+                                AnimatedVisibility(visible = animaLowRam) {
+                                    Column {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                        )
+                                        SwitchSettingRow(
+                                            title = stringResource(R.string.anima_seq_dit),
+                                            description = stringResource(R.string.anima_seq_dit_hint),
+                                            checked = animaSeqDit,
+                                            onCheckedChange = {
+                                                animaSeqDit = it
+                                                preferences.edit {
+                                                    putBoolean("anima_seq_dit", it)
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
                                 HorizontalDivider(
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                 )

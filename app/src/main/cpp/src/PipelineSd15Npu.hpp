@@ -140,21 +140,21 @@ class PipelineSd15Npu : public PipelineQnn {
   }
 
   void runUnetStep(const GenerationRequest &, const float *latents_batch2,
-                   int timestep, bool skip_uncond, Conditioning &cond,
+                   float timestep, bool skip_uncond, Conditioning &cond,
                    float *out_batch2) override {
     if (!unet_) throw std::runtime_error("QNN UNET missing");
 
     const int single_latent_size = 1 * 4 * sample_width * sample_height;
+    const int ts = static_cast<int>(timestep);
     float *latents_in = const_cast<float *>(latents_batch2);
 
-    if (!skip_uncond &&
-        StatusCode::SUCCESS != unet_->executeUnetGraphs(latents_in, timestep,
-                                                        cond.negHidden(),
-                                                        out_batch2))
+    if (!skip_uncond && StatusCode::SUCCESS !=
+                            unet_->executeUnetGraphs(
+                                latents_in, ts, cond.negHidden(), out_batch2))
       throw std::runtime_error("QNN UNET exec failed (uncond)");
 
     if (StatusCode::SUCCESS !=
-        unet_->executeUnetGraphs(latents_in + single_latent_size, timestep,
+        unet_->executeUnetGraphs(latents_in + single_latent_size, ts,
                                  cond.posHidden(),
                                  out_batch2 + single_latent_size))
       throw std::runtime_error("QNN UNET exec failed (cond)");

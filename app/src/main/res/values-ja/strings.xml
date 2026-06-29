@@ -32,6 +32,10 @@
     <string name="tag_import_failed">インポートに失敗しました</string>
     <string name="sdxl_lowram">SDXL 低メモリモード</string>
     <string name="sdxl_lowram_hint">SDXL 専用：各モデルを必要時にのみ読み込み、使用後に解放します。16GB 未満のデバイスでは有効化してください。生成途中のプレビューは無効になります。</string>
+    <string name="anima_lowram">Anima 低メモリモード</string>
+    <string name="anima_lowram_hint">Anima 専用：各モデルを必要時にのみ読み込み、使用後に解放します。16GB 未満のデバイスでは有効化してください。生成途中のプレビューは無効になります。</string>
+    <string name="anima_seq_dit">Anima DiT 逐次ロード</string>
+    <string name="anima_seq_dit_hint">Anima 低メモリモード時のみ有効：DiT の 2 つの部分を同時にメモリへ常駐させません。12GB の RAM があっても Anima 低メモリモードが動作しない場合に有効化してください。ステップごとに遅くなります。</string>
     <string name="captured_logs_title">収集されたログ</string>
     <string name="log_saved">%1$s に保存しました</string>
     <string name="log_save_failed">ログの保存に失敗しました</string>

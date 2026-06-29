@@ -88,10 +88,14 @@ inline size_t prefixBytesWithinBudget(const std::string &text, int budget,
 }
 
 struct ProcessedPrompt {
-  std::vector<int> ids;                      // CLIP (pad 49407)
-  std::vector<int> ids_2;                    // SDXL encoder 2 (pad 0)
-  std::vector<float> weighted_embeddings;    // 77*768
+  std::vector<int> ids;                    // CLIP (pad 49407)
+  std::vector<int> ids_2;                  // SDXL encoder 2 (pad 0)
+  std::vector<float> weighted_embeddings;  // 77*768 (Anima: 512*1024 qwen emb)
   std::vector<float> weighted_embeddings_2;  // SDXL: 77*1280
+  // Anima merged text encoder extra inputs (512-length):
+  std::vector<float> qwen_mask;  // 1=real qwen token, 0=pad (cross-attn mask)
+  std::vector<int> t5_ids;       // T5 token ids (adapter query grid)
+  std::vector<float> t5_mask;  // 1=real t5 token, 0=pad (self-attn + zero rows)
 };
 
 struct ProcessedPromptPair {
@@ -100,6 +104,10 @@ struct ProcessedPromptPair {
   std::vector<float> positive_embeddings;    // 77*768
   std::vector<float> negative_embeddings_2;  // SDXL (77*1280)
   std::vector<float> positive_embeddings_2;  // SDXL (77*1280)
+  // Anima (512-length each):
+  std::vector<float> negative_qwen_mask, positive_qwen_mask;
+  std::vector<int> negative_t5_ids, positive_t5_ids;
+  std::vector<float> negative_t5_mask, positive_t5_mask;
 };
 
 // Result of token counting for the /tokenize endpoint.
@@ -116,9 +124,11 @@ struct TokenizeInfo {
 // encoder 2).
 class TextEncoder {
  public:
-  explicit TextEncoder(bool sdxl) : sdxl_(sdxl) {}
+  explicit TextEncoder(bool sdxl, bool anima = false)
+      : sdxl_(sdxl), anima_(anima) {}
 
   bool isSdxl() const { return sdxl_; }
+  bool isAnima() const { return anima_; }
   tokenizers::Tokenizer *tokenizer() { return tokenizer_.get(); }
 
   void loadTokenizer(const std::string &path) {
@@ -127,10 +137,24 @@ class TextEncoder {
     if (!tokenizer_) throw std::runtime_error("Tokenizer creation failed.");
   }
 
+  // Anima only: the T5 tokenizer that drives the LLM adapter's query grid.
+  void loadT5Tokenizer(const std::string &path) {
+    auto blob = LoadBytesFromFile(path);
+    t5_tokenizer_ = tokenizers::Tokenizer::FromBlobJSON(blob);
+    if (!t5_tokenizer_)
+      throw std::runtime_error("T5 tokenizer creation failed.");
+  }
+
   // Loads pos_emb/token_emb (and the encoder-2 tables for SDXL) from the
   // model directory. SD1.5 token_emb may still be legacy FP32 (detected by
   // file size); SDXL tables are always FP16.
   void loadEmbeddingTables(const std::filesystem::path &dir) {
+    // Anima/Qwen uses RoPE inside the transformer -> there is no positional
+    // table; only the fp16 token-embedding table (vocab x 1024) is needed.
+    if (anima_) {
+      loadTokenEmb(dir / "token_emb.bin", token_emb_, /*force_fp16=*/true);
+      return;
+    }
     loadPosEmb(dir / "pos_emb.bin", pos_emb_);
     loadTokenEmb(dir / "token_emb.bin", token_emb_, /*force_fp16=*/sdxl_);
     if (sdxl_) {
@@ -261,13 +285,93 @@ class TextEncoder {
     return result;
   }
 
+  // Anima/Qwen: BPE ids (no BOS/EOS), padded to qwen_len with the Qwen pad id,
+  // then looked up in the fp16 token-embedding table. No position embedding
+  // (the Qwen transformer applies RoPE internally). The result's
+  // weighted_embeddings is the [qwen_len, 1024] input the merged clip.bin
+  // (Qwen + adapter, QNN) consumes.
+  //
+  // Prompt weighting IS supported: the prompt is parsed by promptProcessor_ so
+  // "(word:1.2)" / "[word]" syntax is stripped (neither tokenizer ever sees the
+  // markers) and each token's weight scales its Qwen input_embedding row. The
+  // T5 side is discrete adapter-query ids, so it gets the same cleaned text but
+  // no weighting. Textual-inversion embeddings are NOT supported (Anima's Qwen
+  // space differs from CLIP's); an embedding trigger degrades to its literal
+  // text via promptProcessor_'s token.text.
+  ProcessedPrompt processAnimaPrompt(const std::string &prompt_text,
+                                     int /*max_len*/) {
+    ProcessedPrompt result;
+    const int dim = anima_text_embedding_size;  // 1024
+    // Qwen input and the T5/adapter context are independent fixed lengths
+    // (currently both 512, kept separate in case an export changes one).
+    const int qwen_len = anima_qwen_seq_len;  // 512
+    const int t5_len = anima_text_seq_len;    // 512
+
+    auto tokens = promptProcessor_.process(prompt_text);
+
+    // ---- Qwen: weighted input_embedding (token_emb lookup) + attn mask ----
+    std::vector<int> ids;
+    std::vector<float> weights;
+    ids.reserve(qwen_len);
+    weights.reserve(qwen_len);
+    for (const auto &token : tokens) {
+      if ((int)ids.size() >= qwen_len) break;
+      for (int id : tokenizer_->Encode(token.text)) {
+        if ((int)ids.size() >= qwen_len) break;
+        ids.push_back(id);
+        weights.push_back(token.weight);
+      }
+    }
+
+    std::vector<float> embeddings((size_t)qwen_len * dim, 0.0f);
+    std::vector<int> padded_ids(qwen_len, kQwenPadId);
+    std::vector<float> qwen_mask(qwen_len, 0.0f);
+    for (int pos = 0; pos < qwen_len; ++pos) {
+      bool real = pos < (int)ids.size();
+      int id = real ? ids[pos] : kQwenPadId;
+      float w = real ? weights[pos] : 1.0f;
+      padded_ids[pos] = id;
+      qwen_mask[pos] = real ? 1.0f : 0.0f;
+      const size_t base = (size_t)id * dim;
+      for (int j = 0; j < dim; ++j)
+        embeddings[(size_t)pos * dim + j] =
+            fp16_to_fp32(token_emb_[base + j]) * w;
+    }
+
+    // ---- T5: adapter query ids + self-attn / row mask (cleaned, unweighted)
+    // -- Mirrors AnimaTokenizer.tokenize: T5 ids of the weight-stripped text,
+    // ensure trailing EOS(=1), pad with 0. The merged graph embeds t5_ids.
+    std::vector<int> t5;
+    if (t5_tokenizer_) {
+      for (const auto &token : tokens)
+        for (int id : t5_tokenizer_->Encode(token.text)) t5.push_back(id);
+    }
+    if (t5.empty() || t5.back() != kT5EosId) t5.push_back(kT5EosId);
+    if ((int)t5.size() > t5_len) t5.resize(t5_len);
+    std::vector<int> t5_ids(t5_len, kT5PadId);
+    std::vector<float> t5_mask(t5_len, 0.0f);
+    for (int pos = 0; pos < (int)t5.size(); ++pos) {
+      t5_ids[pos] = t5[pos];
+      t5_mask[pos] = 1.0f;
+    }
+
+    result.ids = std::move(padded_ids);
+    result.weighted_embeddings = std::move(embeddings);
+    result.qwen_mask = std::move(qwen_mask);
+    result.t5_ids = std::move(t5_ids);
+    result.t5_mask = std::move(t5_mask);
+    return result;
+  }
+
   ProcessedPromptPair processPromptPair(const std::string &positive,
                                         const std::string &negative,
                                         int max_len = 77) {
     ProcessedPromptPair result;
 
-    auto pos_result = processWeightedPrompt(positive, max_len);
-    auto neg_result = processWeightedPrompt(negative, max_len);
+    auto pos_result = anima_ ? processAnimaPrompt(positive, max_len)
+                             : processWeightedPrompt(positive, max_len);
+    auto neg_result = anima_ ? processAnimaPrompt(negative, max_len)
+                             : processWeightedPrompt(negative, max_len);
 
     result.ids.reserve(2 * max_len);
     result.ids.insert(result.ids.end(), neg_result.ids.begin(),
@@ -280,6 +384,15 @@ class TextEncoder {
     result.negative_embeddings_2 = neg_result.weighted_embeddings_2;
     result.positive_embeddings_2 = pos_result.weighted_embeddings_2;
 
+    if (anima_) {
+      result.negative_qwen_mask = std::move(neg_result.qwen_mask);
+      result.positive_qwen_mask = std::move(pos_result.qwen_mask);
+      result.negative_t5_ids = std::move(neg_result.t5_ids);
+      result.positive_t5_ids = std::move(pos_result.t5_ids);
+      result.negative_t5_mask = std::move(neg_result.t5_mask);
+      result.positive_t5_mask = std::move(pos_result.t5_mask);
+    }
+
     return result;
   }
 
@@ -288,9 +401,40 @@ class TextEncoder {
   // indivisible vector block, so it is flagged from its first character.
   TokenizeInfo tokenizeInfo(const std::string &text, int max_len = 77) {
     TokenizeInfo info;
+    if (!tokenizer_) return info;
+
+    // Anima: the UNet context length follows the T5 tokenization (the LLM
+    // adapter's query grid), NOT the Qwen embedding side, so the prompt budget
+    // is measured with the T5 tokenizer. processAnimaPrompt parses the same
+    // weighting syntax (so the count reflects the weight-stripped text, not the
+    // literal "(...)" markers), then appends a trailing EOS — one slot is
+    // reserved for it (count = T5 tokens + 1, budget = max_len - 1). No BOS, no
+    // TI embeddings. Falls back to the Qwen tokenizer only if T5 is missing.
+    if (anima_) {
+      tokenizers::Tokenizer *tok =
+          t5_tokenizer_ ? t5_tokenizer_.get() : tokenizer_.get();
+      const int budget = max_len - 1;
+      auto tokens = promptProcessor_.process(text);
+      int content = 0;
+      for (const auto &token : tokens) {
+        int tc = static_cast<int>(tok->Encode(token.text).size());
+        if (info.overflow_offset < 0 && content + tc > budget) {
+          size_t prefix =
+              prefixBytesWithinBudget(token.text, budget - content, tok);
+          size_t byte_off = (prefix < token.char_src.size())
+                                ? token.char_src[prefix]
+                                : token.source_start;
+          info.overflow_offset = utf8ByteOffsetToUtf16(text, byte_off);
+        }
+        content += tc;
+      }
+      info.count = content + 1;  // + trailing EOS
+      return info;
+    }
+
     // Tokens that fit alongside the implicit BOS/EOS markers.
     const int budget = max_len - 2;
-    if (text.empty() || !tokenizer_) return info;
+    if (text.empty()) return info;
 
     auto tokens = promptProcessor_.process(text);
     const int dim1 = 768;
@@ -422,8 +566,16 @@ class TextEncoder {
              tokenEmbPath.filename().string().c_str(), tokenSize);
   }
 
+  // Qwen pad token id (AnimaTokenizer.QWEN_PAD_ID) used to fill the 512-token
+  // context past the prompt's real tokens. T5 uses EOS=1, pad=0.
+  static constexpr int kQwenPadId = 151643;
+  static constexpr int kT5EosId = 1;
+  static constexpr int kT5PadId = 0;
+
   bool sdxl_ = false;
+  bool anima_ = false;
   std::shared_ptr<tokenizers::Tokenizer> tokenizer_;
+  std::shared_ptr<tokenizers::Tokenizer> t5_tokenizer_;
   PromptProcessor promptProcessor_;
   std::vector<float> pos_emb_;
   TokenEmbTable token_emb_;  // FP16, mmap-backed when stored as FP16 on disk

@@ -19,7 +19,9 @@ constexpr char kMagic[4] = {'P', 'C', 'L', 'P'};
 constexpr uint32_t kVersion = 1;
 constexpr uint32_t kModeSd15 = 0;
 constexpr uint32_t kModeSdxl = 1;
-constexpr uint32_t kSeqLen = 77;
+// Anima (Qwen text encoder): 512-token context, no pooled output. Its own mode
+// keeps its files from ever colliding with a 77-token CLIP cache entry.
+constexpr uint32_t kModeAnima = 2;
 
 struct Header {
   char magic[4];
@@ -43,8 +45,8 @@ inline std::string cachePath(const std::string &cache_dir,
 //   - hidden_dst: seq_len * hidden_dim float32
 //   - pooled_dst: pooled_dim float32 (nullptr for SD1.5)
 inline bool load(const std::string &cache_dir, const std::string &prompt_text,
-                 uint32_t mode, uint32_t hidden_dim, uint32_t pooled_dim,
-                 float *hidden_dst, float *pooled_dst) {
+                 uint32_t mode, uint32_t seq_len, uint32_t hidden_dim,
+                 uint32_t pooled_dim, float *hidden_dst, float *pooled_dst) {
   std::string path = cachePath(cache_dir, prompt_text);
   if (path.empty()) return false;
   std::ifstream ifs(path, std::ios::binary);
@@ -56,7 +58,7 @@ inline bool load(const std::string &cache_dir, const std::string &prompt_text,
   if (std::memcmp(h.magic, kMagic, 4) != 0) return false;
   if (h.version != kVersion) return false;
   if (h.mode != mode) return false;
-  if (h.seq_len != kSeqLen) return false;
+  if (h.seq_len != seq_len) return false;
   if (h.hidden_dim != hidden_dim) return false;
   if (h.pooled_dim != pooled_dim) return false;
 
@@ -73,8 +75,9 @@ inline bool load(const std::string &cache_dir, const std::string &prompt_text,
 }
 
 inline void save(const std::string &cache_dir, const std::string &prompt_text,
-                 uint32_t mode, uint32_t hidden_dim, uint32_t pooled_dim,
-                 const float *hidden_src, const float *pooled_src) {
+                 uint32_t mode, uint32_t seq_len, uint32_t hidden_dim,
+                 uint32_t pooled_dim, const float *hidden_src,
+                 const float *pooled_src) {
   std::string path = cachePath(cache_dir, prompt_text);
   if (path.empty()) return;
   std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
@@ -84,7 +87,7 @@ inline void save(const std::string &cache_dir, const std::string &prompt_text,
   std::memcpy(h.magic, kMagic, 4);
   h.version = kVersion;
   h.mode = mode;
-  h.seq_len = kSeqLen;
+  h.seq_len = seq_len;
   h.hidden_dim = hidden_dim;
   h.pooled_dim = pooled_dim;
   ofs.write(reinterpret_cast<const char *>(&h), sizeof(h));

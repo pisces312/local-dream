@@ -2,6 +2,8 @@
 #define PIPELINESDXL_HPP
 
 #include <MNN/Interpreter.hpp>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -63,12 +65,61 @@ class PipelineSdxl : public PipelineQnn {
       QNN_INFO("img2img disabled: VAE encoder not loaded");
     }
 
+    // Probe mode: getProperty(MAX_SPILLFILL_BUFFER_SIZE) returns 0 on this HTP
+    // version and pre-2.35 binaries carry no metadata, so the only way to learn
+    // each model's real spill-fill need is the backend's own validation error.
+    // Register each context as its own group head with a 1-byte budget:
+    // creation fails and the backend logs "...is smaller than required
+    // spill-fill size N" for each. Read those N from logcat, take the max, then
+    // set LOCALDREAM_SDXL_SPILL_FILL_BYTES to it and unset the probe var.
+    if (getenv("LOCALDREAM_SDXL_SPILL_FILL_PROBE")) {
+      QNN_INFO(
+          "[spill-fill] PROBE: forcing each context to log its required size; "
+          "generation will NOT run this launch");
+      unet_->setSpillFillGroup(1, nullptr);
+      qnn_runtime::initializeApp("UNET", unet_);
+      vae_decoder_->setSpillFillGroup(1, nullptr);
+      qnn_runtime::initializeApp("VAEDecoder", vae_decoder_);
+      if (vae_encoder_) {
+        vae_encoder_->setSpillFillGroup(1, nullptr);
+        qnn_runtime::initializeApp("VAEEncoder", vae_encoder_);
+      }
+      QNN_INFO(
+          "[spill-fill] PROBE done; grep logcat for 'required spill-fill "
+          "size'");
+      return false;
+    }
+
+    // Non-lowram keeps UNet + VAE decoder (+ encoder) resident together but
+    // they execute strictly in sequence, never concurrently. Register all three
+    // QNN contexts into one group so they share a single HTP spill-fill scratch
+    // buffer instead of each reserving its own multi-GB allocation. UNet is the
+    // group head (created first, destroyed last); the VAEs reference its
+    // handle. Size comes from the env var because pre-2.35 binaries don't carry
+    // it.
+    const uint64_t sf_bytes = spillFillGroupBytes();
+    Qnn_ContextHandle_t group_head = nullptr;
+    if (sf_bytes)
+      QNN_INFO("[spill-fill] SDXL context group sharing enabled: %llu bytes",
+               (unsigned long long)sf_bytes);
+
+    unet_->setSpillFillGroup(sf_bytes, nullptr);
     if (qnn_runtime::initializeApp("UNET", unet_) != EXIT_SUCCESS) return false;
+    if (sf_bytes) group_head = unet_->getContextHandle();
+    logSpillFill("UNET", unet_);
+
+    vae_decoder_->setSpillFillGroup(sf_bytes, group_head);
     if (qnn_runtime::initializeApp("VAEDecoder", vae_decoder_) != EXIT_SUCCESS)
       return false;
-    if (vae_encoder_ &&
-        qnn_runtime::initializeApp("VAEEncoder", vae_encoder_) != EXIT_SUCCESS)
-      return false;
+    logSpillFill("VAEDecoder", vae_decoder_);
+
+    if (vae_encoder_) {
+      vae_encoder_->setSpillFillGroup(sf_bytes, group_head);
+      if (qnn_runtime::initializeApp("VAEEncoder", vae_encoder_) !=
+          EXIT_SUCCESS)
+        return false;
+      logSpillFill("VAEEncoder", vae_encoder_);
+    }
     return true;
   }
 
@@ -126,23 +177,24 @@ class PipelineSdxl : public PipelineQnn {
   }
 
   void runUnetStep(const GenerationRequest &, const float *latents_batch2,
-                   int timestep, bool skip_uncond, Conditioning &cond,
+                   float timestep, bool skip_uncond, Conditioning &cond,
                    float *out_batch2) override {
     if (!unet_) throw std::runtime_error("QNN UNET missing");
 
     const int single_latent_size = 1 * 4 * sample_width * sample_height;
+    const int ts = static_cast<int>(timestep);
     float *latents_in = const_cast<float *>(latents_batch2);
     float *time_ids = cond.time_ids.data();
 
     if (!skip_uncond &&
         StatusCode::SUCCESS != unet_->executeUnetGraphsSDXL(
-                                   latents_in, timestep, cond.negHidden(),
+                                   latents_in, ts, cond.negHidden(),
                                    cond.negPooled(), time_ids, out_batch2))
       throw std::runtime_error("QNN UNET SDXL exec failed (uncond)");
 
     if (StatusCode::SUCCESS !=
         unet_->executeUnetGraphsSDXL(
-            latents_in + single_latent_size, timestep, cond.posHidden(),
+            latents_in + single_latent_size, ts, cond.posHidden(),
             cond.posPooled(), time_ids + 6, out_batch2 + single_latent_size))
       throw std::runtime_error("QNN UNET SDXL exec failed (cond)");
   }
@@ -185,6 +237,31 @@ class PipelineSdxl : public PipelineQnn {
   }
 
  private:
+  // Max shared spill-fill buffer (bytes) for the SDXL non-lowram context group.
+  // Hardcoded default = 920 MiB, chosen to cover the measured per-model
+  // requirements (UNet 89,063,424 / VAE-dec 884,801,536 / VAE-enc 575,668,224)
+  // with headroom; the backend honors the group head's value so it must be >=
+  // the largest of the three. Sharing one 920 MiB buffer instead of three
+  // separate ones saves ~600 MB. The LOCALDREAM_SDXL_SPILL_FILL_BYTES env var
+  // overrides this (e.g. after regenerating binaries); set it to 0 to disable
+  // sharing entirely.
+  static uint64_t spillFillGroupBytes() {
+    const char *e = getenv("LOCALDREAM_SDXL_SPILL_FILL_BYTES");
+    if (e && *e) return strtoull(e, nullptr, 10);
+    return 964689920ULL;  // 920 MiB
+  }
+
+  // Diagnostic: log a model's real HTP spill-fill requirement so the right
+  // group buffer size can be chosen. Run once with sharing disabled
+  // (LOCALDREAM_SDXL_SPILL_FILL_BYTES=0) to read all three clean values.
+  static void logSpillFill(const char *name,
+                           const std::unique_ptr<QnnModel> &model) {
+    if (!model) return;
+    uint64_t bytes = model->querySpillFillSize();
+    QNN_INFO("[spill-fill] %s requires %llu bytes (%.1f MB)", name,
+             (unsigned long long)bytes, bytes / (1024.0 * 1024.0));
+  }
+
   void loadClipsIfNeeded() {
     if (!clip_interpreter_) {
       clip_interpreter_ = createMnnInterpreterMmap(clip_path_.c_str());
