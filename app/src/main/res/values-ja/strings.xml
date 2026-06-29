@@ -95,7 +95,7 @@
     <string name="download_model_hint">%s をダウンロードしますか？\nモデルのサイズが大きいため、Wi-Fi 環境でのダウンロードをおすすめします。\nダウンロード中はアプリを終了しないでください。\n\n現在、すべての Qualcomm 製チップ向けに NPU モデルのダウンロードを開放していますが、\nお使いのチップが古い場合、正常に動作しない可能性があります。</string>
     <string name="download_done">ダウンロード完了</string>
     <string name="unsupport_npu">お使いのデバイスは現在サポートされていません。CPU 版をご利用ください。</string>
-    <string name="cpu_models">CPU Models</string>
+    <string name="cpu_models">CPU/GPU Models</string>
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">モデルなし</string>
     <string name="no_npu_models">モデルなし</string>

@@ -95,7 +95,7 @@
     <string name="download_model_hint">确定要下载 %s 吗？模型较大，建议使用WiFi网络下载。下载过程请勿退出应用程序。\n\n我们目前对所有高通芯片开放NPU模型下载，如果你的芯片较旧，可能无法运行</string>
     <string name="download_done">模型下载完成</string>
     <string name="unsupport_npu">您的设备暂不支持，请使用CPU版本</string>
-    <string name="cpu_models">CPU Models</string>
+    <string name="cpu_models">CPU/GPU 模型</string>
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">暂无模型</string>
     <string name="no_npu_models">暂无模型</string>
