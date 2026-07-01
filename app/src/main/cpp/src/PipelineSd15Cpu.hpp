@@ -1,11 +1,10 @@
 #ifndef PIPELINESD15CPU_HPP
 #define PIPELINESD15CPU_HPP
 
+#include <MNN/Interpreter.hpp>
 #include <memory>
 #include <stdexcept>
 #include <string>
-
-#include <MNN/Interpreter.hpp>
 
 #include "Config.hpp"
 #include "MnnUtils.hpp"
@@ -59,8 +58,7 @@ class PipelineSd15Cpu : public Pipeline {
              77 * text_embedding_size * sizeof(float));
       interpreter->runSession(session);
       auto out = interpreter->getSessionOutput(session, "last_hidden_state");
-      memcpy(dst, out->host<float>(),
-             77 * text_embedding_size * sizeof(float));
+      memcpy(dst, out->host<float>(), 77 * text_embedding_size * sizeof(float));
     };
 
     if (need_negative) run_side(prompts.negative_embeddings, cond.negHidden());
@@ -70,8 +68,8 @@ class PipelineSd15Cpu : public Pipeline {
     delete interpreter;
   }
 
-  void vaeEncode(const GenerationRequest &req, const float *image,
-                 float *mean, float *std_dev) override {
+  void vaeEncode(const GenerationRequest &req, const float *image, float *mean,
+                 float *std_dev) override {
     MNN::Interpreter *interpreter =
         createMnnInterpreterMmap(vae_encoder_path_.c_str());
     if (!interpreter) throw std::runtime_error("Failed MNN VAE Enc create");
@@ -104,8 +102,7 @@ class PipelineSd15Cpu : public Pipeline {
 
     mean_t->copyToHostTensor(mean_nchw_tensor);
     std_t->copyToHostTensor(std_nchw_tensor);
-    memcpy(mean, mean_nchw_tensor->host<float>(),
-           latent_count * sizeof(float));
+    memcpy(mean, mean_nchw_tensor->host<float>(), latent_count * sizeof(float));
     memcpy(std_dev, std_nchw_tensor->host<float>(),
            latent_count * sizeof(float));
 
@@ -123,8 +120,8 @@ class PipelineSd15Cpu : public Pipeline {
       throw std::runtime_error(
           "Failed to create temporary MNN UNET interpreter!");
 
-    unet_session_ = createMnnSession(unet_interpreter_,
-                                     sessionOptions(req, "unet_cache"));
+    unet_session_ =
+        createMnnSession(unet_interpreter_, sessionOptions(req, "unet_cache"));
     if (!unet_session_)
       throw std::runtime_error("Failed to create temporary MNN UNET session!");
 
@@ -144,8 +141,9 @@ class PipelineSd15Cpu : public Pipeline {
   }
 
   void runUnetStep(const GenerationRequest &req, const float *latents_batch2,
-                   int timestep, bool /*skip_uncond*/, Conditioning &cond,
+                   float timestep_f, bool /*skip_uncond*/, Conditioning &cond,
                    float *out_batch2) override {
+    const int timestep = static_cast<int>(timestep_f);
     auto samp = unet_interpreter_->getSessionInput(unet_session_, "sample");
     auto ts = unet_interpreter_->getSessionInput(unet_session_, "timestep");
     auto enc = unet_interpreter_->getSessionInput(unet_session_,

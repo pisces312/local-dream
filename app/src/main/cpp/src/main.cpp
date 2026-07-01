@@ -11,6 +11,7 @@
 #include "Config.hpp"
 #include "MnnUtils.hpp"
 #include "Pipeline.hpp"
+#include "PipelineAnima.hpp"
 #include "PipelineSd15Cpu.hpp"
 #include "PipelineSd15Npu.hpp"
 #include "PipelineSdxl.hpp"
@@ -42,9 +43,13 @@
 //   sdxl:    tokenizer.json clip.mnn pos_emb.bin token_emb.bin clip_2.mnn
 //            pos_emb_2.bin token_emb_2.bin unet.bin vae_encoder.bin
 //            vae_decoder.bin
-// CLIP always runs on MNN (CPU) with precomputed token/pos embeddings.
+//   anima:   tokenizer.json tokenizer_t5.json token_emb.bin clip.bin
+//            unet_part1.bin unet_part2.bin vae_decoder.bin
+//            [vae_encoder.bin] (optional; enables img2img/inpaint)
+// SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
+// (the C++ side still does the qwen token_emb lookup -> input_embedding).
 struct ServerOptions {
-  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl };
+  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl, kAnima };
 
   int port = 8081;
   std::string listen_address = "127.0.0.1";
@@ -57,11 +62,13 @@ struct ServerOptions {
   bool use_v_pred = false;
   bool no_img2img = false;  // skip the VAE encoder entirely
   bool lowram = false;
+  bool anima_seq_dit = false;  // (anima+lowram) never co-resident DiT halves
   bool upscaler_mode = false;
   bool convert_mode = false;
   bool convert_clip_skip_2 = false;
 
   bool isSdxl() const { return type == ModelType::kSdxl; }
+  bool isAnima() const { return type == ModelType::kAnima; }
   bool isMnn() const { return type == ModelType::kSd15Cpu; }
 };
 
@@ -76,7 +83,7 @@ static void showHelp() {
          "\n"
          "Modes:\n"
          "  --type <type>          Model format: sd15cpu (MNN), sd15npu "
-         "(QNN), sdxl (QNN)\n"
+         "(QNN), sdxl (QNN), anima (QNN)\n"
          "  --upscaler_mode        Upscale-only server, no diffusion model\n"
          "  --convert <dir>        Convert model.safetensors in <dir> to MNN "
          "and exit\n"
@@ -95,7 +102,9 @@ static void showHelp() {
          "  --listen_all           Listen on 0.0.0.0 instead of 127.0.0.1\n"
          "  --no_img2img           Do not load the VAE encoder\n"
          "  --use_v_pred           v-prediction model\n"
-         "  --lowram               (sdxl) load/release models per stage\n"
+         "  --lowram               (sdxl/anima) load/release models per stage\n"
+         "  --anima_seq_dit        (anima+lowram) never keep both DiT halves "
+         "resident; for 12GB devices\n"
          "  --clip_skip_2          (convert) export CLIP with skip 2\n"
          "  --log_level <n>        QNN log level\n"
          "  --version              Print QNN SDK build id\n"
@@ -126,6 +135,7 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     OPT_PATCH,
     OPT_UPSCALER_MODE,
     OPT_LOWRAM,
+    OPT_ANIMA_SEQ_DIT,
     OPT_LOG_LEVEL
   };
   static struct pal::Option s_longOptions[] = {
@@ -144,6 +154,7 @@ static ServerOptions processCommandLine(int argc, char **argv) {
       {"patch", pal::required_argument, NULL, OPT_PATCH},
       {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
       {"lowram", pal::no_argument, NULL, OPT_LOWRAM},
+      {"anima_seq_dit", pal::no_argument, NULL, OPT_ANIMA_SEQ_DIT},
       {"log_level", pal::required_argument, NULL, OPT_LOG_LEVEL},
       {NULL, 0, NULL, 0}};
 
@@ -202,6 +213,9 @@ static ServerOptions processCommandLine(int argc, char **argv) {
       case OPT_LOWRAM:
         opts.lowram = true;
         break;
+      case OPT_ANIMA_SEQ_DIT:
+        opts.anima_seq_dit = true;
+        break;
       case OPT_LOG_LEVEL:
         logLevel = sample_app::parseLogLevel(pal::g_optArg);
         if (logLevel != QNN_LOG_LEVEL_MAX) {
@@ -222,6 +236,8 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     opts.type = ServerOptions::ModelType::kSdxl;
   else if (typeStr == "sd15npu")
     opts.type = ServerOptions::ModelType::kSd15Npu;
+  else if (typeStr == "anima")
+    opts.type = ServerOptions::ModelType::kAnima;
   else
     showHelpAndExit(typeStr.empty() ? "Missing --type"
                                     : "Invalid --type: " + typeStr);
@@ -275,6 +291,38 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
                                                 TextEncoder &text_encoder) {
   const std::filesystem::path dir(opts.model_dir);
   const bool sdxl = opts.isSdxl();
+  const bool anima = opts.isAnima();
+
+  // Anima: Qwen "CLIP" (clip.bin, QNN) + split DiT (unet_part1/2.bin) + 16-ch
+  // VAE. The Qwen text encoder uses RoPE internally, so there is no
+  // pos_emb.bin.
+  if (anima) {
+    std::string clip_path = (dir / "clip.bin").string();
+    std::string unet_part1_path = (dir / "unet_part1.bin").string();
+    std::string unet_part2_path = (dir / "unet_part2.bin").string();
+    std::string vae_decoder_path = (dir / "vae_decoder.bin").string();
+    std::string vae_encoder_path =
+        opts.no_img2img ? "" : (dir / "vae_encoder.bin").string();
+
+    std::vector<std::string> required = {
+        (dir / "tokenizer.json").string(),
+        (dir / "tokenizer_t5.json").string(),
+        clip_path,
+        unet_part1_path,
+        unet_part2_path,
+        vae_decoder_path,
+        (dir / "token_emb.bin").string(),
+    };
+    if (!vae_encoder_path.empty()) required.push_back(vae_encoder_path);
+    for (const auto &p : required) {
+      if (!std::filesystem::exists(p)) showHelpAndExit("File not found: " + p);
+    }
+    return std::make_unique<PipelineAnima>(
+        text_encoder, opts.model_dir, clip_path, unet_part1_path,
+        unet_part2_path, vae_decoder_path, vae_encoder_path, opts.lowram,
+        opts.anima_seq_dit);
+  }
+
   const std::string ext = opts.isMnn() ? ".mnn" : ".bin";
   std::string clip_path = (dir / (sdxl ? "clip.mnn" : "clip_v2.mnn")).string();
   std::string clip2_path = sdxl ? (dir / "clip_2.mnn").string() : "";
@@ -344,8 +392,8 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
     try {
       auto json = nlohmann::json::parse(request.body);
       auto req = std::make_shared<GenerationRequest>(parseGenerationRequest(
-          json, pipeline->isSdxl(), pipeline->supportsImg2Img(),
-          pipeline->supportsUltrafix()));
+          json, pipeline->isSdxl(), pipeline->isAnima(),
+          pipeline->supportsImg2Img(), pipeline->supportsUltrafix()));
 
       std::cout << "Req Rcvd: P:" << req->prompt
                 << " NP:" << req->negative_prompt << " S:" << req->steps
@@ -612,7 +660,9 @@ static void registerTokenizeEndpoint(httplib::Server &svr,
     try {
       auto json = nlohmann::json::parse(req.body);
       std::string text = json.value("prompt", std::string());
-      const int max_len = 77;
+      // Anima counts with the T5 tokenizer against the context length (512),
+      // far longer than CLIP's 77.
+      const int max_len = text_encoder->isAnima() ? anima_text_seq_len : 77;
 
       TokenizeInfo info = text_encoder->tokenizeInfo(text, max_len);
 
@@ -654,10 +704,13 @@ int main(int argc, char **argv) {
     if (!opts.lib_dir.empty() && !qnn_runtime::init(opts.lib_dir))
       showHelpAndExit("Failed get QNN system func ptrs.");
   } else {
-    text_encoder = std::make_unique<TextEncoder>(opts.isSdxl());
+    text_encoder = std::make_unique<TextEncoder>(opts.isSdxl(), opts.isAnima());
     try {
-      text_encoder->loadTokenizer(
-          (std::filesystem::path(opts.model_dir) / "tokenizer.json").string());
+      const std::filesystem::path mdir(opts.model_dir);
+      text_encoder->loadTokenizer((mdir / "tokenizer.json").string());
+      // Anima's LLM adapter is fed by a second (T5) tokenizer.
+      if (opts.isAnima())
+        text_encoder->loadT5Tokenizer((mdir / "tokenizer_t5.json").string());
     } catch (const std::exception &e) {
       std::cerr << "Failed load tokenizer: " << e.what() << std::endl;
       return EXIT_FAILURE;

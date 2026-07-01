@@ -101,14 +101,15 @@ using ProgressCallback = std::function<void(int, int, const std::string &)>;
 // consumes as encoder_hidden_states; `pooled` and `time_ids` only exist for
 // SDXL.
 struct Conditioning {
-  std::vector<float> hidden;    // [2, 77, hidden_dim]
+  std::vector<float> hidden;    // [2, seq_len, hidden_dim]
   std::vector<float> pooled;    // [2, pooled_dim]
   std::vector<float> time_ids;  // [2, 6]
   int hidden_dim = 0;
   int pooled_dim = 0;
+  int seq_len = 77;  // 77 for CLIP (SD/SDXL), 512 for Qwen/T5 (Anima)
 
   float *negHidden() { return hidden.data(); }
-  float *posHidden() { return hidden.data() + 77 * hidden_dim; }
+  float *posHidden() { return hidden.data() + (size_t)seq_len * hidden_dim; }
   float *negPooled() { return pooled.empty() ? nullptr : pooled.data(); }
   float *posPooled() {
     return pooled.empty() ? nullptr : pooled.data() + pooled_dim;
@@ -168,6 +169,9 @@ class Pipeline {
   virtual bool initialize() = 0;
   virtual bool supportsImg2Img() const = 0;
   bool isSdxl() const { return sdxl_; }
+  // Anima runs the same fixed-1024 graphs as SDXL but isn't an SDXL pipeline;
+  // the request parser uses this to force the 1024 canvas.
+  virtual bool isAnima() const { return false; }
   // Ultrafix needs the VAE encoder (img2img) plus fixed-size graphs that can
   // be run as tiles; the MNN (CPU) format has neither constraint nor need.
   virtual bool supportsUltrafix() const {
@@ -204,8 +208,10 @@ class Pipeline {
   virtual void endDenoise() {}
   // One UNet evaluation over the [negative, positive] batch. When
   // skip_uncond is true only the positive half of out_batch2 is written.
+  // `timestep` is float to carry rectified-flow sigmas (Anima); the integer
+  // DDPM formats round it back to an int internally.
   virtual void runUnetStep(const GenerationRequest &req,
-                           const float *latents_batch2, int timestep,
+                           const float *latents_batch2, float timestep,
                            bool skip_uncond, Conditioning &cond,
                            float *out_batch2) = 0;
 
@@ -226,6 +232,46 @@ class Pipeline {
   virtual void releaseTransientModels() {}
 
   float vaeScale() const { return sdxl_ ? 0.13025f : 0.18215f; }
+
+  // --- text-conditioning generalization hooks ----------------------------
+  // Context sequence length fed to the UNet: CLIP = 77, Anima (T5/Qwen) = 512.
+  virtual int textSeqLen() const { return 77; }
+  // encoder_hidden_states feature dim: SD = 768, SDXL = 768+1280, Anima = 1024.
+  virtual int textHiddenDim() const {
+    return sdxl_ ? text_embedding_size + text_embedding_size_2
+                 : text_embedding_size;
+  }
+  // Pooled embedding dim (0 when the format has no pooled output).
+  virtual int textPooledDim() const {
+    return sdxl_ ? text_embedding_size_2 : 0;
+  }
+  // Whether on-disk prompt caching applies. The cache file records its own
+  // seq_len/mode, so any format can opt in (SD/SDXL = 77-token CLIP, Anima =
+  // 512-token context); only formats whose CLIP output isn't reproducible from
+  // the prompt text alone would override this to false.
+  virtual bool promptCacheSupported() const { return true; }
+
+  // --- latent-space generalization hooks ---------------------------------
+  // Latent channel count: SD1.5 / SDXL = 4, Anima (Wan-VAE DiT) = 16.
+  virtual int latentChannels() const { return 4; }
+  // Scheduler factory. Default builds a DDPM-family scheduler from the
+  // request; rectified-flow formats (Anima) override this to return a
+  // FlowMatchScheduler.
+  virtual std::unique_ptr<Scheduler> makeScheduler(
+      const GenerationRequest &req, const char *timestep_spacing) {
+    return createScheduler(req.scheduler_type, timestep_spacing);
+  }
+  // Map a model-space latent to the VAE's input space (used before decode and
+  // for previews). SD applies a single reciprocal scale; Anima de-normalizes
+  // per channel (latent * std + mean).
+  virtual void latentsToVae(xt::xarray<float> &latents) const {
+    latents = xt::eval((1.0f / vaeScale()) * latents);
+  }
+  // Inverse of latentsToVae: VAE-encoder output -> model latent space
+  // (img2img). SD scales; Anima normalizes per channel ((latent - mean)/std).
+  virtual void vaeToLatents(xt::xarray<float> &latents) const {
+    latents = xt::eval(vaeScale() * latents);
+  }
 
   TextEncoder &text_encoder_;
   const std::string model_dir_;
@@ -260,10 +306,13 @@ class Pipeline {
   std::string renderPreview(const GenerationRequest &req,
                             const xt::xarray<float> &latents);
 
+  // All VAE decoders (SD/SDXL and Anima) emit pixels in [-1,1], so map them
+  // back with (x+1)/2 then *255.
   static std::vector<uint8_t> pixelsToBytes(const xt::xarray<float> &pixels) {
     auto img = xt::view(pixels, 0);
     auto transp = xt::transpose(img, {1, 2, 0});
-    auto norm = xt::clip(((transp + 1.0) / 2.0) * 255.0, 0.0, 255.0);
+    xt::xarray<double> scaled = (transp + 1.0) / 2.0 * 255.0;
+    auto norm = xt::clip(scaled, 0.0, 255.0);
     xt::xarray<uint8_t> u8_img = xt::cast<uint8_t>(norm);
     return std::vector<uint8_t>(u8_img.begin(), u8_img.end());
   }
@@ -300,10 +349,10 @@ class Pipeline {
 inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
   const int batch_size = 2;
   Conditioning cond;
-  cond.hidden_dim =
-      sdxl_ ? text_embedding_size + text_embedding_size_2 : text_embedding_size;
-  cond.pooled_dim = sdxl_ ? text_embedding_size_2 : 0;
-  cond.hidden.assign((size_t)batch_size * 77 * cond.hidden_dim, 0.0f);
+  cond.hidden_dim = textHiddenDim();
+  cond.pooled_dim = textPooledDim();
+  cond.seq_len = textSeqLen();
+  cond.hidden.assign((size_t)batch_size * cond.seq_len * cond.hidden_dim, 0.0f);
   if (sdxl_) {
     cond.pooled.assign((size_t)batch_size * cond.pooled_dim, 0.0f);
     cond.time_ids.assign((size_t)batch_size * 6, 0.0f);
@@ -322,7 +371,8 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
   // whose prompt resolves any TI embedding token is excluded from disk
   // caching: the CLIP output then depends on currently-loaded embedding
   // data we don't want frozen into a stable file.
-  std::string cache_dir = ensureCacheDir(model_dir_);
+  std::string cache_dir =
+      promptCacheSupported() ? ensureCacheDir(model_dir_) : std::string();
   bool neg_cache_eligible =
       !cache_dir.empty() &&
       !text_encoder_.promptHasEmbedding(req.negative_prompt);
@@ -330,16 +380,19 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
       !cache_dir.empty() && !text_encoder_.promptHasEmbedding(req.prompt);
 
   const uint32_t cache_mode =
-      sdxl_ ? prompt_cache::kModeSdxl : prompt_cache::kModeSd15;
+      isAnima() ? prompt_cache::kModeAnima
+                : (sdxl_ ? prompt_cache::kModeSdxl : prompt_cache::kModeSd15);
 
-  bool neg_hit = neg_cache_eligible &&
-                 prompt_cache::load(cache_dir, req.negative_prompt, cache_mode,
-                                    cond.hidden_dim, cond.pooled_dim,
-                                    cond.negHidden(), cond.negPooled());
+  bool neg_hit =
+      neg_cache_eligible &&
+      prompt_cache::load(cache_dir, req.negative_prompt, cache_mode,
+                         cond.seq_len, cond.hidden_dim, cond.pooled_dim,
+                         cond.negHidden(), cond.negPooled());
   bool pos_hit =
       pos_cache_eligible &&
-      prompt_cache::load(cache_dir, req.prompt, cache_mode, cond.hidden_dim,
-                         cond.pooled_dim, cond.posHidden(), cond.posPooled());
+      prompt_cache::load(cache_dir, req.prompt, cache_mode, cond.seq_len,
+                         cond.hidden_dim, cond.pooled_dim, cond.posHidden(),
+                         cond.posPooled());
 
   if (neg_hit) QNN_INFO("Prompt cache hit (negative)");
   if (pos_hit) QNN_INFO("Prompt cache hit (positive)");
@@ -349,8 +402,8 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
     return cond;
   }
 
-  ProcessedPromptPair processed =
-      text_encoder_.processPromptPair(req.prompt, req.negative_prompt, 77);
+  ProcessedPromptPair processed = text_encoder_.processPromptPair(
+      req.prompt, req.negative_prompt, cond.seq_len);
 
   auto parsed_input_text = text_encoder_.decode(processed.ids);
   QNN_INFO("Parsed Input Text: %s", parsed_input_text.c_str());
@@ -360,24 +413,30 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
   // Persist freshly-computed CLIP outputs (per side). Sides that used a
   // TI embedding stay out of disk cache.
   if (!neg_hit && neg_cache_eligible) {
-    prompt_cache::save(cache_dir, req.negative_prompt, cache_mode,
+    prompt_cache::save(cache_dir, req.negative_prompt, cache_mode, cond.seq_len,
                        cond.hidden_dim, cond.pooled_dim, cond.negHidden(),
                        cond.negPooled());
   }
   if (!pos_hit && pos_cache_eligible) {
-    prompt_cache::save(cache_dir, req.prompt, cache_mode, cond.hidden_dim,
-                       cond.pooled_dim, cond.posHidden(), cond.posPooled());
+    prompt_cache::save(cache_dir, req.prompt, cache_mode, cond.seq_len,
+                       cond.hidden_dim, cond.pooled_dim, cond.posHidden(),
+                       cond.posPooled());
   }
   return cond;
 }
 
 inline xt::xarray<float> Pipeline::encodeImageToLatent(
     const GenerationRequest &req, const xt::xarray<float> &original_image) {
-  std::vector<int> shape = {1, 4, sample_height, sample_width};
+  // Latent channel count varies by format (SD/SDXL = 4, Anima = 16); the tiled
+  // path below is QNN-4-channel only (Anima never tiles), so it keeps the 4.
+  const int latent_ch = latentChannels();
+  std::vector<int> shape = {1, latent_ch, sample_height, sample_width};
 
   if (!useTiledVae(req)) {
-    std::vector<float> vae_enc_mean(1 * 4 * sample_width * sample_height);
-    std::vector<float> vae_enc_std(1 * 4 * sample_width * sample_height);
+    std::vector<float> vae_enc_mean(1 * latent_ch * sample_width *
+                                    sample_height);
+    std::vector<float> vae_enc_std(1 * latent_ch * sample_width *
+                                   sample_height);
 
     // For SDXL aspect-ratio padded inpaint with a synthetic base (txt2img
     // path) the VAE encoder input is a deterministic white-on-black canvas
@@ -766,7 +825,8 @@ inline xt::xarray<float> Pipeline::ultrafixInvertNoise(
 inline std::string Pipeline::renderPreview(const GenerationRequest &req,
                                            const xt::xarray<float> &latents) {
   try {
-    xt::xarray<float> preview_latents = xt::eval((1.0 / vaeScale()) * latents);
+    xt::xarray<float> preview_latents = latents;
+    latentsToVae(preview_latents);
     xt::xarray<float> pixels =
         decodeToPixels(req, preview_latents, /*verbose=*/false);
 
@@ -806,7 +866,8 @@ inline GenerationResult Pipeline::generate(
   if (req.img2img && req.img_data.size() != (size_t)3 * req.width * req.height)
     throw std::invalid_argument("Invalid img_data");
   if (req.has_mask &&
-      (req.mask_data.size() != (size_t)4 * (req.width / 8) * (req.height / 8) ||
+      (req.mask_data.size() !=
+           (size_t)latentChannels() * (req.width / 8) * (req.height / 8) ||
        req.mask_data_full.size() != (size_t)3 * req.width * req.height))
     throw std::invalid_argument("Invalid mask_data");
 
@@ -837,14 +898,13 @@ inline GenerationResult Pipeline::generate(
 
     // --- Scheduler & Latents ---
     const char *timestep_spacing = sdxl_ ? "trailing" : "leading";
-    std::unique_ptr<Scheduler> scheduler =
-        createScheduler(req.scheduler_type, timestep_spacing);
+    std::unique_ptr<Scheduler> scheduler = makeScheduler(req, timestep_spacing);
     if (use_v_pred_) scheduler->set_prediction_type("v_prediction");
     scheduler->set_timesteps(req.steps);
     xt::xarray<float> timesteps = scheduler->get_timesteps();
-    const float vae_scale = vaeScale();
-    std::vector<int> shape = {1, 4, sample_height, sample_width};
-    std::vector<int> shape_batch2 = {batch_size, 4, sample_height,
+    const int latent_ch = latentChannels();
+    std::vector<int> shape = {1, latent_ch, sample_height, sample_width};
+    std::vector<int> shape_batch2 = {batch_size, latent_ch, sample_height,
                                      sample_width};
     xt::random::seed(req.seed);
     xt::xarray<float> latents = xt::random::randn<float>(shape);
@@ -864,7 +924,8 @@ inline GenerationResult Pipeline::generate(
       original_image = xt::adapt(req.img_data, img_shape);
 
       xt::xarray<float> img_lat = encodeImageToLatent(req, original_image);
-      xt::xarray<float> img_lat_scaled = xt::eval(vae_scale * img_lat);
+      xt::xarray<float> img_lat_scaled = img_lat;
+      vaeToLatents(img_lat_scaled);
 
       std::cout << "VAE Enc dur: " << elapsedMs(vae_enc_start) << "ms\n";
 
@@ -918,7 +979,8 @@ inline GenerationResult Pipeline::generate(
       latents = scheduler->add_noise(original_latents, latents_noise, t);
 
       if (req.has_mask) {
-        mask = xt::adapt(req.mask_data, {1, 4, sample_height, sample_width});
+        mask = xt::adapt(req.mask_data,
+                         {1, latent_ch, sample_height, sample_width});
         mask_full =
             xt::adapt(req.mask_data_full, {1, 3, output_height, output_width});
 
@@ -945,7 +1007,7 @@ inline GenerationResult Pipeline::generate(
     }
 
     // --- UNET Denoising Loop ---
-    int single_latent_size = 1 * 4 * sample_width * sample_height;
+    int single_latent_size = 1 * latent_ch * sample_width * sample_height;
 
     // Ultrafix: the latent is larger than the fixed UNet graph, so every
     // step runs the graph over an overlapping tile grid.
@@ -992,8 +1054,8 @@ inline GenerationResult Pipeline::generate(
                               latents_scaled.end());
         std::vector<float> unet_out_latents(batch_size * single_latent_size);
 
-        runUnetStep(req, latents_in_vec.data(), static_cast<int>(current_ts),
-                    skip_uncond, cond, unet_out_latents.data());
+        runUnetStep(req, latents_in_vec.data(), current_ts, skip_uncond, cond,
+                    unet_out_latents.data());
 
         if (skip_uncond) {
           // cfg = 1 path: only the cond half of unet_out_latents was filled.
@@ -1119,7 +1181,7 @@ inline GenerationResult Pipeline::generate(
                 << req.height << " output..." << std::endl;
     }
 
-    latents = xt::eval((1.0 / vae_scale) * latents);
+    latentsToVae(latents);
     xt::xarray<float> pixels = decodeToPixels(req, latents, /*verbose=*/true);
 
     std::cout << "VAE Dec dur: " << elapsedMs(vae_dec_start) << "ms\n";

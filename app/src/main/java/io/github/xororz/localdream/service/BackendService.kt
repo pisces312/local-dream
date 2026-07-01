@@ -409,8 +409,19 @@ class BackendService : Service() {
                     File(filesDir, "safety_checker.mnn").absolutePath,
                 )
             }
+            // SDXL and Anima are the large NPU formats that benefit from
+            // per-stage load/release. They share the same backend --lowram flag
+            // but keep separate UI toggles so each can opt in independently.
             if (backendType == "sdxl" && preferences.getBoolean("sdxl_lowram", true)) {
                 command += "--lowram"
+            }
+            if (backendType == "anima" && preferences.getBoolean("anima_lowram", true)) {
+                command += "--lowram"
+                // Aggressive variant: never hold both DiT halves resident at
+                // once, so 12GB devices can run Anima low-RAM. Slower per step.
+                if (preferences.getBoolean("anima_seq_dit", false)) {
+                    command += "--anima_seq_dit"
+                }
             }
             if (listenOnAll) {
                 command += "--listen_all"

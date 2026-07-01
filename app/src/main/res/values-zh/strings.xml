@@ -32,6 +32,10 @@
     <string name="tag_import_failed">导入失败</string>
     <string name="sdxl_lowram">SDXL 低内存模式</string>
     <string name="sdxl_lowram_hint">仅 SDXL 生效：按需加载每个模型，用完即释放。小于 16GB 内存的设备建议开启。开启后将禁用生成过程预览。</string>
+    <string name="anima_lowram">Anima 低内存模式</string>
+    <string name="anima_lowram_hint">仅 Anima 生效：按需加载每个模型，用完即释放。小于 16GB 内存的设备建议开启。开启后将禁用生成过程预览。</string>
+    <string name="anima_seq_dit">Anima DiT 轮流加载</string>
+    <string name="anima_seq_dit_hint">仅在 Anima 低内存模式下生效：不再让 DiT 的两块同时驻留内存。如果你有 12GB 内存但 Anima 低内存模式仍无法运行，请开启此选项。每步速度会变慢。</string>
     <string name="captured_logs_title">已收集的日志</string>
     <string name="log_saved">已保存到 %1$s</string>
     <string name="log_save_failed">日志保存失败</string>
@@ -299,6 +303,9 @@
 
     <!-- Upscaler -->
     <string name="select_upscaler_model">选择超分辨率模型</string>
+    <string name="upscale_scale_label">放大倍率</string>
+    <string name="upscale_factor">%d×</string>
+    <string name="upscale_scale_hint">模型始终以 4× 放大,2× 和 3× 只是将结果缩放以用于其他用途。</string>
     <string name="upscaling_image">正在超分辨率处理…</string>
     <string name="upscale_failed">超分辨率失败: %s</string>
 

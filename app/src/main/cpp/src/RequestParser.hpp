@@ -21,7 +21,7 @@
 // (synthetic canvas, paint-rectangle mask synthesis / intersection), and the
 // ultrafix (tiled img2img) validation.
 inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
-                                                bool sdxl,
+                                                bool sdxl, bool anima,
                                                 bool img2img_available,
                                                 bool ultrafix_supported) {
   GenerationRequest req;
@@ -75,7 +75,10 @@ inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
     req.show_diffusion_process = false;
   }
 
-  if (sdxl && !req.ultrafix) {
+  // SDXL and Anima both run fixed-1024 graphs; force the canvas regardless of
+  // what the client sent so a stale/wrong size can't reach the QNN graphs.
+  // (Anima has no ultrafix path, so the !ultrafix guard is moot there.)
+  if ((sdxl || anima) && !req.ultrafix) {
     req.width = 1024;
     req.height = 1024;
   }
@@ -89,15 +92,20 @@ inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
 
   const int sample_w = req.width / 8;
   const int sample_h = req.height / 8;
+  // Latent channel count of the target format: SD/SDXL = 4, Anima = 16. The
+  // latent-space inpaint mask is replicated across every channel, so it must be
+  // sized to match (Pipeline reads it as {1, latent_ch, h, w}).
+  const int latent_ch = anima ? anima_latent_channels : 4;
 
-  // --- SDXL aspect ratio: parse target dims first ------------------------
-  // Resolve target_crop_w/h from aspect_ratio. We compute it independently
-  // of img/mask presence so all three modes (txt2img / img2img / inpaint)
-  // share the same downstream crop-after-decode behavior. Requires a VAE
-  // encoder so the synthetic black canvas can be encoded as the inpaint
-  // base latent; if the SDXL build was started without one, fall through
-  // to plain 1024x1024 generation.
-  if (sdxl && json.contains("aspect_ratio") && img2img_available &&
+  // --- Fixed-1024 aspect ratio: parse target dims first ------------------
+  // SDXL and Anima both render on a fixed 1024 canvas and reach non-1:1
+  // outputs by inpainting a centered crop. Resolve target_crop_w/h from
+  // aspect_ratio independently of img/mask presence so all three modes
+  // (txt2img / img2img / inpaint) share the same downstream crop-after-decode
+  // behavior. Requires a VAE encoder so the synthetic black canvas can be
+  // encoded as the inpaint base latent; if the build was started without one,
+  // fall through to plain 1024x1024 generation.
+  if ((sdxl || anima) && json.contains("aspect_ratio") && img2img_available &&
       !req.ultrafix) {
     std::string ar = json["aspect_ratio"].get<std::string>();
     auto colon = ar.find(':');
@@ -208,10 +216,12 @@ inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
       xt::xarray<uint8_t> xmlat_u8 = xt::adapt(mask_pix_lat_rgb, mlat_shape);
       xt::xarray<float> xmlat_f = xt::mean(xt::cast<float>(xmlat_u8), {2});
       xmlat_f = xt::eval(xmlat_f / 255.0f);
-      xmlat_f = xt::reshape_view(xmlat_f, {1, 1, sample_h, sample_w});
-      xt::xarray<float> xmlat_f_4 =
-          xt::concatenate(xt::xtuple(xmlat_f, xmlat_f, xmlat_f, xmlat_f), 1);
-      req.mask_data.assign(xmlat_f_4.begin(), xmlat_f_4.end());
+      // Replicate the single-channel spatial mask across all latent channels.
+      const size_t plane = (size_t)sample_h * sample_w;
+      req.mask_data.resize((size_t)latent_ch * plane);
+      for (int c = 0; c < latent_ch; ++c)
+        std::copy(xmlat_f.begin(), xmlat_f.end(),
+                  req.mask_data.begin() + (size_t)c * plane);
 
       std::vector<int> mfull_shape = {req.height, req.width, 3};
       xt::xarray<uint8_t> xmfull_u8 = xt::adapt(mask_pix_full_rgb, mfull_shape);
@@ -242,7 +252,7 @@ inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
 
     if (req.has_mask) {
       // Zero out everything outside the paint rectangle.
-      for (int c = 0; c < 4; ++c) {
+      for (int c = 0; c < latent_ch; ++c) {
         for (int y = 0; y < sample_h; ++y) {
           float *row =
               req.mask_data.data() + ((size_t)c * sample_h + y) * sample_w;
@@ -268,8 +278,8 @@ inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
       }
     } else {
       // No user mask: aspect mask alone, full opacity in the paint rect.
-      req.mask_data.assign((size_t)4 * sample_w * sample_h, 0.0f);
-      for (int c = 0; c < 4; ++c) {
+      req.mask_data.assign((size_t)latent_ch * sample_w * sample_h, 0.0f);
+      for (int c = 0; c < latent_ch; ++c) {
         for (int y = ly0; y < ly1; ++y) {
           float *row =
               req.mask_data.data() + ((size_t)c * sample_h + y) * sample_w;

@@ -161,14 +161,15 @@ internal suspend fun checkBackendHealth(
 }
 
 /**
- * For SDXL with a non-1:1 aspectRatio, returns the centered (target_w, target_h)
- * region inside the 1024x1024 generation canvas. The longest side is forced to
- * canvasMax (1024), the shortest side is scaled by the ratio and aligned down to
- * a multiple of 8. Returns null in all other cases (non-SDXL, 1:1, malformed),
- * meaning "no padding, use canvas size directly."
+ * For a fixed-1024-canvas model (SDXL / Anima) with a non-1:1 aspectRatio,
+ * returns the centered (target_w, target_h) region inside the 1024x1024
+ * generation canvas. The longest side is forced to canvasMax (1024), the
+ * shortest side is scaled by the ratio and aligned down to a multiple of 8.
+ * Returns null in all other cases (non-fixed-canvas, 1:1, malformed), meaning
+ * "no padding, use canvas size directly."
  */
-fun computeAspectTargetSize(isSdxl: Boolean, aspectRatio: String, canvasMax: Int = 1024): Pair<Int, Int>? {
-    if (!isSdxl) return null
+fun computeAspectTargetSize(usesFixedCanvas: Boolean, aspectRatio: String, canvasMax: Int = 1024): Pair<Int, Int>? {
+    if (!usesFixedCanvas) return null
     val parts = aspectRatio.split(":")
     if (parts.size != 2) return null
     val rw = parts[0].toIntOrNull() ?: return null
@@ -411,8 +412,8 @@ internal fun bitmapToBase64Jpeg(bitmap: Bitmap, quality: Int = 95): String {
 }
 
 /** Default generation canvas side length for a model class. */
-internal fun defaultGenerationSize(isSdxl: Boolean, runOnCpu: Boolean): Int = when {
-    isSdxl -> 1024
+internal fun defaultGenerationSize(usesFixedCanvas: Boolean, runOnCpu: Boolean): Int = when {
+    usesFixedCanvas -> 1024
     runOnCpu -> 256
     else -> 512
 }

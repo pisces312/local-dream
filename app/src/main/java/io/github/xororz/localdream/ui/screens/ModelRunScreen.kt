@@ -292,8 +292,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 prompt = "",
                 negativePrompt = "",
                 generationTime = "",
-                width = defaultGenerationSize(model?.isSdxl == true, model?.runOnCpu == true),
-                height = defaultGenerationSize(model?.isSdxl == true, model?.runOnCpu == true),
+                width = defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true),
+                height = defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true),
                 runOnCpu = model?.runOnCpu ?: false,
             ),
         )
@@ -332,10 +332,10 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     var currentWidth by remember {
-        mutableIntStateOf(defaultGenerationSize(model?.isSdxl == true, model?.runOnCpu == true))
+        mutableIntStateOf(defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true))
     }
     var currentHeight by remember {
-        mutableIntStateOf(defaultGenerationSize(model?.isSdxl == true, model?.runOnCpu == true))
+        mutableIntStateOf(defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true))
     }
     var availableResolutions by remember { mutableStateOf<List<Resolution>>(emptyList()) }
     var showResolutionChangeDialog by remember { mutableStateOf(false) }
@@ -499,8 +499,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     // (effectiveWidth, effectiveHeight) is the size of the visible result.
     // For SDXL with non-1:1 aspect_ratio it equals the centered target_w/target_h
     // inside the 1024x1024 generation canvas; otherwise it equals the canvas itself.
-    val effectiveSize = remember(model?.isSdxl, aspectRatio, currentWidth, currentHeight) {
-        computeAspectTargetSize(model?.isSdxl == true, aspectRatio)
+    val effectiveSize = remember(model?.usesFixedCanvas, aspectRatio, currentWidth, currentHeight) {
+        computeAspectTargetSize(model?.usesFixedCanvas == true, aspectRatio)
             ?: Pair(currentWidth, currentHeight)
     }
     val effectiveWidth = effectiveSize.first
@@ -625,7 +625,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             try {
                 base64EncodeDone = false
                 val aspectTarget =
-                    computeAspectTargetSize(model?.isSdxl == true, aspectRatio)
+                    computeAspectTargetSize(model?.usesFixedCanvas == true, aspectRatio)
                 val targetW = aspectTarget?.first ?: currentWidth
                 val targetH = aspectTarget?.second ?: currentHeight
 
@@ -753,7 +753,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
         scope.launch {
             val ready = try {
                 base64EncodeDone = false
-                val aspectTarget = computeAspectTargetSize(model?.isSdxl == true, aspectRatio)
+                val aspectTarget = computeAspectTargetSize(model?.usesFixedCanvas == true, aspectRatio)
                 val targetW = aspectTarget?.first ?: currentWidth
                 val targetH = aspectTarget?.second ?: currentHeight
 
@@ -1111,7 +1111,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     LaunchedEffect(modelId, model?.runOnCpu) {
-        if (model?.runOnCpu == false && model.isSdxl == false) {
+        if (model?.runOnCpu == false && !model.usesFixedCanvas) {
             val baseResolution = Resolution(512, 512)
             val patchResolutions = withContext(Dispatchers.IO) {
                 PatchScanner.scanAvailableResolutions(context, modelId)
@@ -1147,13 +1147,13 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             aspectRatio = if (useImg2img) prefs.aspectRatio else "1:1"
 
             currentWidth = when {
-                model.isSdxl -> 1024
-                prefs.width == -1 -> defaultGenerationSize(isSdxl = false, runOnCpu = model.runOnCpu)
+                model.usesFixedCanvas -> 1024
+                prefs.width == -1 -> defaultGenerationSize(usesFixedCanvas = false, runOnCpu = model.runOnCpu)
                 else -> prefs.width
             }
             currentHeight = when {
-                model.isSdxl -> 1024
-                prefs.height == -1 -> defaultGenerationSize(isSdxl = false, runOnCpu = model.runOnCpu)
+                model.usesFixedCanvas -> 1024
+                prefs.height == -1 -> defaultGenerationSize(usesFixedCanvas = false, runOnCpu = model.runOnCpu)
                 else -> prefs.height
             }
 
@@ -1484,11 +1484,11 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         cfg = defaults.cfg,
                         seed = defaults.seed,
                         width = defaultGenerationSize(
-                            model?.isSdxl == true,
+                            model?.usesFixedCanvas == true,
                             model?.runOnCpu == true,
                         ),
                         height = defaultGenerationSize(
-                            model?.isSdxl == true,
+                            model?.usesFixedCanvas == true,
                             model?.runOnCpu == true,
                         ),
                         denoiseStrength = defaults.denoiseStrength,
@@ -1624,7 +1624,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     availableRuntimes = RuntimeManager.listAvailableRuntimes(context)
                                 }
                                 AdvancedSettingsDialog(
-                                    isSdxl = model?.isSdxl == true,
+                                    isSdxl = model?.usesFixedCanvas == true,
                                     runOnCpu = model?.runOnCpu ?: false,
                                     useImg2img = useImg2img,
                                     isRunning = isRunning,
@@ -2453,7 +2453,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             }
         }
         if (showCropScreen && imageUriForCrop != null) {
-            val aspectTarget = computeAspectTargetSize(model?.isSdxl == true, aspectRatio)
+            val aspectTarget = computeAspectTargetSize(model?.usesFixedCanvas == true, aspectRatio)
             val cropW = aspectTarget?.first ?: currentWidth
             val cropH = aspectTarget?.second ?: currentHeight
             CropImageScreen(
@@ -2704,7 +2704,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             upscalerRepository = upscalerRepository,
             upscalerPreferences = upscalerPreferences,
             onDismiss = { showUpscalerDialog = false },
-            onUpscalerConfirmed = { selectedUpscaler ->
+            onUpscalerConfirmed = { selectedUpscaler, selectedScale ->
                 showUpscalerDialog = false
 
                 // Execute upscale
@@ -2721,6 +2721,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                 context = context,
                                 bitmap = bitmap,
                                 upscalerId = selectedUpscaler.id,
+                                targetScale = selectedScale,
                             )
 
                             // Save upscaled image via HistoryManager (DB + JPG file)
@@ -3044,7 +3045,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 if (isUltrafixParams) {
                     saveUltrafixParams()
                 }
-                if (model?.isSdxl == true && useImg2img) {
+                if (model?.usesFixedCanvas == true && useImg2img) {
                     val newRatio = inferAspectRatioString(params.width, params.height)
                     if (newRatio != aspectRatio) {
                         aspectRatio = newRatio
