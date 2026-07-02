@@ -1357,12 +1357,15 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
         }
     }
 
-    // Only intercept back while a generation is running: back then offers to
-    // interrupt the generation and stays on the screen (a second back exits).
-    // In idle state the predictive back gesture can show NavHost's peek of
-    // the previous destination.
-    if (isRunning) {
-        BackHandler { showInterruptDialog = true }
+    // Intercept back when running (interrupt dialog) or on result/history
+    // pages (scroll back to prompt page). On the prompt page with no
+    // generation running, let the system handle back → pop to model list.
+    BackHandler(enabled = isRunning || pagerState.currentPage != 0) {
+        if (isRunning) {
+            showInterruptDialog = true
+        } else {
+            coroutineScope.launch { pagerState.animateScrollToPage(0) }
+        }
     }
 
     if (showInterruptDialog) {
@@ -2245,6 +2248,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         IconButton(onClick = {
                             if (isRunning) {
                                 showInterruptDialog = true
+                            } else if (pagerState.currentPage != 0) {
+                                coroutineScope.launch { pagerState.animateScrollToPage(0) }
                             } else {
                                 handleExit()
                             }
