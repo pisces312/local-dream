@@ -56,7 +56,7 @@ android {
 //        minSdk = 31
         targetSdk = 36
         versionCode = 74
-        versionName = "3.0.0-alpha.2"
+        versionName = "3.0.0-alpha.3"
 
         // Surfaced in the About section. The commit time is the commit's own
         // timestamp rather than the build's, so it stays meaningful when the
