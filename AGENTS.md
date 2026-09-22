@@ -49,6 +49,51 @@ build.bat release basic         # 通用 APK
 build-sm8850.sh release basic   # SM8850 精简 APK
 ```
 
+## 正式版（release）签名必须走环境变量
+
+**规则：release/对外分发 APK 只用环境变量签名；密钥路径、密码、alias 一律不入库**
+（不写进 `gradle.properties`、`local.properties`、`build*.bat|sh` 或任何提交进 git 的文件）。
+
+未设置签名变量时，release 构建仍可产出 **unsigned** APK（便于本机调试）；需要安装/分发时
+必须补齐下列变量后再打包或用 apksigner 重签。
+
+### Gradle 签名（`app/build.gradle.kts` 的 `signingConfigs.release`）
+
+通过 Gradle 属性注入，等价环境变量写法：
+
+```bash
+# Git Bash / Linux
+export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE='D:/nili/my-git-projects/my-backup/backup-settings/my-android-release.keystore'
+export ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD='<password>'
+export ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS='pisces312'
+export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD='<password>'
+./gradlew.bat assembleBasicRelease
+```
+
+```powershell
+# PowerShell
+$env:ORG_GRADLE_PROJECT_RELEASE_STORE_FILE = 'D:\nili\my-git-projects\my-backup\backup-settings\my-android-release.keystore'
+$env:ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD = '<password>'
+$env:ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS = 'pisces312'
+$env:ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD = '<password>'
+```
+
+- `build.gradle.kts` 仅在 `RELEASE_STORE_FILE` 存在时挂 `signingConfig`；否则 release 产物不签名。
+- debug 变体同样只在提供了上述变量时复用 release keystore（保证覆盖安装签名一致）。
+- 密码与 keystore 本机路径见用户全局配置（`CLAUDE.md`），**不要复制进本仓库**。
+
+### apksigner 重签（`build.bat` / `build-sm8850.sh` 精简流程）
+
+SM8850 脚本会剥非 V81 `.so` 后 **zipalign + apksigner 重签**，使用另一组变量：
+
+```bash
+export KEY_STORE='D:/nili/my-git-projects/my-backup/backup-settings/my-android-release.keystore'
+export KEY_STORE_PASSWORD='<password>'
+export KEY_ALIAS='pisces312'          # 可省，默认 pisces312
+```
+
+未设置时脚本只警告并跳过签名，产出未签名 APK。
+
 ## 重要注意事项
 
 - **SampleApp patch 已直接入库**：`3rdparty/SampleApp/src/` 中的源文件已包含 mmap、convertToFloatInto 等改动，不需要运行时 apply `SampleApp.patch`。`SampleApp.patch` 仅为历史归档。

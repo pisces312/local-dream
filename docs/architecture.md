@@ -292,16 +292,18 @@ filesDir/runtime_libs/
 
 ### 7.2 Release Signing
 
-Release 构建需要签名配置。在 `gradle.properties` 中设置：
+Release 构建需要签名配置。**只通过环境变量注入，不要写入 `gradle.properties` 等入库文件**
+（完整规则见 `AGENTS.md`「正式版（release）签名必须走环境变量」）：
 
-```properties
-RELEASE_STORE_FILE=keystore.jks
-RELEASE_STORE_PASSWORD=your_password
-RELEASE_KEY_ALIAS=your_alias
-RELEASE_KEY_PASSWORD=your_key_password
+```bash
+export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE=/path/to/my-android-release.keystore
+export ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD=<password>
+export ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS=pisces312
+export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD=<password>
 ```
 
-或将 `keystore.jks` 放在 `app/` 目录下。
+`build.bat` / `build-sm8850.sh` 的 apksigner 重签另用 `KEY_STORE` / `KEY_STORE_PASSWORD` / `KEY_ALIAS`。
+未设置时 release 产出 unsigned APK，仅供本机调试。
 
 ### 7.3 C++ Backend Rebuild
 
