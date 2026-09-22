@@ -272,7 +272,7 @@ bash build-sm8850.sh debug basic
    产物 11,981,560 字节。注意增量构建很快是因为 `build/android/` 缓存还在。
 
    **为什么 2026-09-19 那次没碰到**：那天的 core 构建走的就是上面这条 Bash 直调 exe 的路径
-   （即 `AGENTS.md`「快速构建」里的"或手动"部分，原 `claude.md`，2026-09-20 起更名合并），**全程没有经过 PowerShell 工具**，
+   （即 `AGENTS.md`「快速构建」里的"或手动"部分，2026-09-20 起统一到 AGENTS.md），**全程没有经过 PowerShell 工具**，
    自然不会触发沙箱。本次是**调用路径不同**，不是环境发生了变化。特别提醒：用户环境里
    那条「跑 Windows 程序用 PowerShell 工具原生调用」的经验，是为绕开
    「MSYS 下 `import torch` 必 SIGSEGV」而立的，**不适用于 cmake / ninja 这类普通构建工具** ——

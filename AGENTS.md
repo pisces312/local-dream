@@ -80,7 +80,7 @@ $env:ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD = '<password>'
 
 - `build.gradle.kts` 仅在 `RELEASE_STORE_FILE` 存在时挂 `signingConfig`；否则 release 产物不签名。
 - debug 变体同样只在提供了上述变量时复用 release keystore（保证覆盖安装签名一致）。
-- 密码与 keystore 本机路径见用户全局配置（`CLAUDE.md`），**不要复制进本仓库**。
+- 密码与 keystore 本机路径见用户全局配置（不在本仓库），**不要复制进本仓库**。
 
 ### apksigner 重签（`build.bat` / `build-sm8850.sh` 精简流程）
 

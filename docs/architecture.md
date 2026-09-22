@@ -307,7 +307,7 @@ export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD=<password>
 
 ### 7.3 C++ Backend Rebuild
 
-**当前状态：** `libstable_diffusion_core.so` 从官方 APK 提取，非从源码编译。
+**当前状态：** `libstable_diffusion_core.so` 与 `libdit_engine.so` 均从源码编译并入库/jniLibs（见 `AGENTS.md`「快速构建」）。
 
 **如需从源码编译，需要：**
 1.  QNN SDK 2.28+ (高通开发者门户下载)
