@@ -47,8 +47,9 @@ cp -r build/android/qnnlibs/* ../../assets/qnnlibs/
 # 「Native 重建必须同步 build-info」。
 
 # 2. 构建 APK
-build.bat release basic         # 通用 APK
-build-sm8850.sh release basic   # SM8850 精简 APK
+build.bat release basic         # 通用 APK（含全部 qnnlibs，约 156MB）
+build-sm8850.sh release basic   # SM8850 精简 APK（只留 V81；debug 同理：
+                                #   build-sm8850.sh debug basic）
 ```
 
 ## 正式版（release）签名必须走环境变量

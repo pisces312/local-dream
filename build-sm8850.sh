@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Local Dream Build Script — SM8850 (Snapdragon 8 Elite 2nd gen) only
-# Builds normally, then strips non-V81 QNN libs from the APK before signing.
-# Source assets directory is never modified.
+# Builds normally, then strips non-V81 QNN + DiT HTP libs from the APK before
+# signing (debug and release alike). Source assets directory is never modified.
+# For a multi-device APK use build.bat instead — it keeps every qnnlibs arch.
 #
 # Usage: ./build-sm8850.sh [debug|release] [basic|filter] [-d <device>]
 #   (default: release basic)
@@ -76,8 +77,11 @@ if [[ ! -f "$SOURCE_APK" ]]; then
     exit 1
 fi
 
-# ─── Step 3: Strip non-V81 QNN libs from APK ───
-echo "=== Step 3: Stripping non-V81 QNN libs from APK ==="
+# ─── Step 3: Strip non-V81 native libs from APK ───
+# QNN keeps the V81 runtime trio plus the shared Htp/System libs. DiT keeps
+# only the V81 FastRPC skel: SM8850 is HTP v81, so the v79 skel is dead weight
+# here (~0.9MB). Source assets are untouched.
+echo "=== Step 3: Stripping non-V81 QNN + DiT libs from APK ==="
 
 APK_SIZE_BEFORE=$(du -h "$SOURCE_APK" | cut -f1)
 echo "  APK before: $APK_SIZE_BEFORE"
@@ -92,6 +96,7 @@ keep = {
     'assets/qnnlibs/libQnnHtpV81.so',
     'assets/qnnlibs/libQnnHtpV81Skel.so',
     'assets/qnnlibs/libQnnHtpV81Stub.so',
+    'assets/ditlibs/libggml-htp-v81.so',
 }
 tmp = apk + '.tmp'
 removed = 0
@@ -100,9 +105,12 @@ with zipfile.ZipFile(apk, 'r') as zin, zipfile.ZipFile(tmp, 'w', zin.compression
         if item.filename.startswith('assets/qnnlibs/') and item.filename not in keep:
             removed += 1
             continue
+        if item.filename.startswith('assets/ditlibs/') and item.filename not in keep:
+            removed += 1
+            continue
         zout.writestr(item, zin.read(item.filename))
 shutil.move(tmp, apk)
-print(f'  Removed {removed} QNN lib entries')
+print(f'  Removed {removed} non-V81 lib entries')
 " "$SOURCE_APK_WIN"
 
 APK_SIZE_AFTER=$(du -h "$SOURCE_APK" | cut -f1)
