@@ -63,7 +63,7 @@ build-sm8850.sh release basic   # SM8850 精简 APK
 
 ```bash
 # Git Bash / Linux
-export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE='D:/nili/my-git-projects/my-backup/backup-settings/my-android-release.keystore'
+export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE='D:/my-projects/my-backup/backup-settings/my-android-release.keystore'
 export ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD='<password>'
 export ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS='pisces312'
 export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD='<password>'
@@ -72,7 +72,7 @@ export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD='<password>'
 
 ```powershell
 # PowerShell
-$env:ORG_GRADLE_PROJECT_RELEASE_STORE_FILE = 'D:\nili\my-git-projects\my-backup\backup-settings\my-android-release.keystore'
+$env:ORG_GRADLE_PROJECT_RELEASE_STORE_FILE = 'D:\my-projects\my-backup\backup-settings\my-android-release.keystore'
 $env:ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD = '<password>'
 $env:ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS = 'pisces312'
 $env:ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD = '<password>'
@@ -87,7 +87,7 @@ $env:ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD = '<password>'
 SM8850 脚本会剥非 V81 `.so` 后 **zipalign + apksigner 重签**，使用另一组变量：
 
 ```bash
-export KEY_STORE='D:/nili/my-git-projects/my-backup/backup-settings/my-android-release.keystore'
+export KEY_STORE='D:/my-projects/my-backup/backup-settings/my-android-release.keystore'
 export KEY_STORE_PASSWORD='<password>'
 export KEY_ALIAS='pisces312'          # 可省，默认 pisces312
 ```

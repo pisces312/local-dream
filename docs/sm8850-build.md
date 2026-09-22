@@ -18,8 +18,8 @@ SM8850（第五代骁龙 8 至尊版）只需要 HTP V81 相关的 5 个库（�
 
 ```bash
 # 设置签名环境变量
-export KEY_STORE="D:\nili\my-git-projects\my-backup\backup-settings\my-android-release.keystore"
-export KEY_STORE_PASSWORD="314159"
+export KEY_STORE='D:/my-projects/my-backup/backup-settings/my-android-release.keystore'
+export KEY_STORE_PASSWORD='<password>'
 
 # 构建 SM8850 专属 release APK
 ./build-sm8850.sh release basic
