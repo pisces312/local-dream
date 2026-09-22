@@ -116,9 +116,8 @@ sudo apt update && sudo apt install -y ninja-build cmake
 
 # 2. 解压 Hexagon SDK 到 WSL 本地（避免 /mnt 路径/性能问题）
 mkdir -p ~/hexagon && tar -xJf /mnt/d/dev/hexagon-sdk-v6.6.0.0-amd64-lnx.tar.xz -C ~/hexagon
-# 解压后 HEXAGON_SDK_ROOT 指向含版本号的目录，例如 ~/hexagon/hexagon/6.6.0.0
-# 请用 ls 确认实际顶层目录名后回填：
-export HEXAGON_SDK_ROOT="$HOME/hexagon/hexagon/6.6.0.0"
+# 本机实际安装在 ~/hexagon-sdk-v6.6.0.0（顶层即 SDK 根，含 hexagon_sdk.json）
+export HEXAGON_SDK_ROOT="$HOME/hexagon-sdk-v6.6.0.0"
 
 # 3. NDK 29：建议也复制到 WSL 本地（/mnt/c 长路径偶尔会触发 cmake 问题）
 #    若先试 /mnt/c 路径失败再复制。复制示例：
