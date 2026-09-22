@@ -43,6 +43,8 @@ D:/dev/android_sdk/cmake/3.22.1/bin/cmake.exe --preset android-release \
 D:/dev/android_sdk/cmake/3.22.1/bin/cmake.exe --build --preset android-release
 cp build/android/bin/arm64-v8a/libstable_diffusion_core.so ../../jniLibs/arm64-v8a/
 cp -r build/android/qnnlibs/* ../../assets/qnnlibs/
+# 若走的是上面手动 cmake（而非 cpp/build.sh），必须补写 build-info，见下文
+# 「Native 重建必须同步 build-info」。
 
 # 2. 构建 APK
 build.bat release basic         # 通用 APK
@@ -101,6 +103,45 @@ export KEY_ALIAS='pisces312'          # 可省，默认 pisces312
 - **ccache 禁用**：CMakePresets.json 配置了 `CMAKE_C_COMPILER_LAUNCHER=ccache`，Windows 下必须传入 `-DCMAKE_C_COMPILER_LAUNCHER="" -DCMAKE_CXX_COMPILER_LAUNCHER=""`。
 - **Ninja 路径**：必须显式指定 `-DCMAKE_MAKE_PROGRAM=...`，避免 cmake 找到不兼容版本。
 - **上游**：`upstream` = `github.com/xororz/local-dream`，`origin` = 自己的 fork。
+
+## Native 重建必须同步 build-info（防 ABI 误报）
+
+`app/src/main/assets/build-info/{core,dit-engine}.json` 由 `tools/collect-build-info.py`
+写入，**gitignored 本地产物**，打进 APK 后供「高级设置 → 构建信息」展示。UI 的
+`ABI check` / `matches recorded build-id` **只比 manifest**，不读 `.so` 里的编译常量——
+manifest 过期会误报 `MISMATCH`（二进制实际可能完全匹配）。
+
+**规则：每次替换/重建任一 native .so，必须重写对应 manifest。**
+
+| 产物 | 构建入口 | manifest | 谁负责写 |
+|---|---|---|---|
+| `libstable_diffusion_core.so` | `rebuild-native.bat` / `cpp/build.sh` / `cpp/build.bat` | `core.json` | **仅** `cpp/build.sh` 自动写 |
+| `libdit_engine.so` + HTP skels | `dit/build.sh`（WSL2） | `dit-engine.json` | `dit/build.sh` 自动写 |
+
+`rebuild-native.bat`、`cpp/build.bat`、`build.bat` 以及「WSL2 编完只拷 `.so`」都
+**不会**更新 manifest。Windows 侧补 core manifest：
+
+```bash
+python tools/collect-build-info.py \
+  --name core \
+  --out app/src/main/assets/build-info/core.json \
+  --repo . \
+  --abi-version "$(sed -n 's/^#define DIT_ENGINE_ABI_VERSION \([0-9]*\).*/\1/p' app/src/main/cpp/include/DitEngine.h)" \
+  --toolchain-path "qairt=${QAIRT_PATH}" \
+  --artifact app/src/main/jniLibs/arm64-v8a/libstable_diffusion_core.so
+```
+
+**改 `DIT_ENGINE_ABI_VERSION`（`cpp/include/DitEngine.h`）时：core 与 engine 两侧都要
+重建，两侧 manifest 都要重写。** 二者由独立脚本构建，只动一侧会在运行时被
+`dit_engine_get_api()` 的 exact match 拒绝。验收顺序：
+
+1. UI `ABI check` 为 match，两侧 `abiVersion` 相同
+2. 两侧 `matches recorded build-id: true`（`.so` 未在 manifest 写完后被替换）
+3. 实机 DiT 出一张图（能出图才证明二进制层 ABI 真匹配）
+
+已踩坑（2026-09-22 Qwen Image 2.1，ABI 3→5）：`67384f7` 重建了两侧 `.so` 但未刷新
+`core.json`，UI 报 `MISMATCH: engine v5 vs core v3`，实际 Qwen 可正常出图——纯 stale
+manifest 误报。`assets/build-info/` 不进 git，rebuild commit 不会自动带上它。
 
 ## submodule 的 dirty 状态是预期的，不要"清理"
 

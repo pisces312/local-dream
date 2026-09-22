@@ -23,7 +23,8 @@ v3.0.0-alpha.1 起，z-image / flux2-klein 等走 DiT 后端，依赖 `libdit_en
 | `assets/ditlibs/libggml-htp-v79.so` / `v81.so` | **来自官方 APK** | DiT 引擎的 HTP skel，同上 |
 | `libandroidx.graphics.path.so` / `libdatastore_shared_counter.so` | AGP 自动打入 | Compose / Jetpack 原生依赖 |
 
-ABI 契约：`app/src/main/cpp/include/DitEngine.h` 里 `DIT_ENGINE_ABI_VERSION=1`，
+ABI 契约：`app/src/main/cpp/include/DitEngine.h` 里 `DIT_ENGINE_ABI_VERSION`
+（本文写作时为 1；以当前头文件为准，2026-09 起已升到 5），
 与官方 v3.0.0 同源一致；`BackendService` 的 skel 复制逻辑（`prepareRuntimeDir()`）
 已就绪，只差把 so + skel 打进包。
 
@@ -140,7 +141,7 @@ bash app/src/main/cpp/dit/build.sh
 ```
 
 `dit/build.sh` 行为（已读源码确认）：
-- 读 `DIT_ENGINE_ABI_VERSION`（=1）并据此编译；若主干 `DitEngine.h` 改了版本号需同步。
+- 读 `DIT_ENGINE_ABI_VERSION`（以当前 `DitEngine.h` 为准）并据此编译；若主干 `DitEngine.h` 改了版本号需同步，且 **core 侧也要重建**并刷新 `build-info/core.json`（见根目录 AGENTS.md「Native 重建必须同步 build-info」）。
 - `cmake -B build/android -G Ninja`，`ANDROID_ABI=arm64-v8a`，`ANDROID_PLATFORM=android-28`，
   `-march=armv8.7a+fp16+dotprod+i8mm`（armv8.7a 需 NDK 29 的 clang，NDK r28 不够 → 这也是必须 29 的原因）。
 - 自动 `cp build/android/lib/arm64-v8a/libdit_engine.so` → `app/src/main/jniLibs/arm64-v8a/`
@@ -158,8 +159,8 @@ file app/src/main/jniLibs/arm64-v8a/libdit_engine.so
 # 期望：aarch64 / API28 / NDK r28 风格剥离符号的共享库，大小与官方 ~55MB 量级接近
 ```
 
-- ABI 版本：确认 `DIT_ENGINE_ABI_VERSION` 与官方一致（=1），否则运行时 `DitEngine`
-  会拒绝加载。
+- ABI 版本：确认两侧 manifest 的 `abiVersion` 与当前 `DitEngine.h` 一致，并重建过
+  matching 的 core/engine 对；否则运行时 `dit_engine_get_api()` 会拒绝加载。
 - 若自构建产物与官方二进制 `file` 输出、大小、z-image 实机启动行为一致，即可**移除
   官方 APK 提取的 so**，只保留自构建产物，达成完全独立构建。
 

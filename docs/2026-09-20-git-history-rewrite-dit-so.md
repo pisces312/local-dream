@@ -79,6 +79,7 @@ bash app/src/main/cpp/dit/build.sh
 ```
 
 `dit/build.sh` 会自动从 `include/DitEngine.h` 读取 `DIT_ENGINE_ABI_VERSION`
+（写入 `dit-engine.json`；core 侧 `core.json` 需单独刷新，见 AGENTS.md）
 （当前为 **3**），并把 `libdit_engine.so` 落到 `jniLibs/`、把 DSP skel
 （`libggml-htp-v79.so` / `v81.so`）落到 `assets/ditlibs/`。
 后两者在仓库中**被跟踪**，重建后如有变化需要提交。
