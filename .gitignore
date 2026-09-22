@@ -8,6 +8,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Wrong-path leftovers from an early prebuilt drop; real ones live under src/main/.
+app/src/assets/
+app/src/jniLibs/
 # app/src/main/jniLibs  --  allow pre-built .so for fork
 # libdit_engine.so (~55MB, self-built) is kept local only and never committed:
 # 87% of it is ggml-hexagon HTP compute-graph constants compiled into .rodata.
