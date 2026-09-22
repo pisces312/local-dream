@@ -10,6 +10,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.ui.screens.GenerationParameters
@@ -17,7 +18,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.Base64
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
@@ -26,17 +26,17 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 
 private val saveSequence = AtomicLong(0L)
 
-private val reportClient: OkHttpClient by lazy {
-    Http.client.newBuilder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
-}
+// FIXME: Disabled — reportImage sends images to report.chino.icu
+//private val reportClient: OkHttpClient by lazy {
+//    Http.client.newBuilder()
+//        .connectTimeout(30, TimeUnit.SECONDS)
+//        .writeTimeout(60, TimeUnit.SECONDS)
+//        .readTimeout(30, TimeUnit.SECONDS)
+//        .build()
+//}
 
 // A single upscale call covers model load + tiled inference, which can take
 // minutes for large inputs.
@@ -80,9 +80,12 @@ suspend fun performUpscale(
 ): Bitmap = withContext(Dispatchers.IO) {
     val totalStartTime = System.currentTimeMillis()
 
+    // Get upscaler model path - use remote path if provided, otherwise local
     val upscalerPath = remoteUpscalerPath ?: run {
-        val upscalerFile =
-            File(File(Model.getModelsDir(context), upscalerId), Model.UPSCALER_FILE_NAME)
+        val generationPreferences = GenerationPreferences(context)
+        val customPath = generationPreferences.getModelsStoragePath()
+        val upscalerModelsDir = File(Model.getModelsDir(context, customPath), upscalerId)
+        val upscalerFile = File(upscalerModelsDir, Model.UPSCALER_FILE_NAME)
         if (!upscalerFile.exists()) {
             throw Exception("Upscaler model file not found: ${upscalerFile.absolutePath}")
         }
@@ -179,6 +182,7 @@ suspend fun performUpscale(
     }
 }
 
+// FIXME: Commented out due to privacy concerns — was uploading full images to report.chino.icu
 suspend fun reportImage(
     bitmap: Bitmap,
     modelName: String,
@@ -186,6 +190,10 @@ suspend fun reportImage(
     onSuccess: () -> Unit,
     onError: (String) -> Unit,
 ) {
+    withContext(Dispatchers.Main) {
+        onSuccess()
+    }
+    /*
     withContext(Dispatchers.IO) {
         try {
             val byteArrayOutputStream = ByteArrayOutputStream()
@@ -235,6 +243,7 @@ suspend fun reportImage(
             }
         }
     }
+    */
 }
 
 suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, onError: (String) -> Unit) {

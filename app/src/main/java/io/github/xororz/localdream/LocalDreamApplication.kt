@@ -2,6 +2,7 @@ package io.github.xororz.localdream
 
 import android.app.Application
 import io.github.xororz.localdream.data.HistoryMigration
+import io.github.xororz.localdream.data.RuntimeManager
 import io.github.xororz.localdream.data.MigrationState
 import io.github.xororz.localdream.data.db.AppDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,7 @@ class LocalDreamApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        appScope.launch { RuntimeManager.ensureDefaultRuntime(this@LocalDreamApplication) }
         startMigration()
     }
 

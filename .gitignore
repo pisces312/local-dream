@@ -8,15 +8,33 @@
 .externalNativeBuild
 .cxx
 local.properties
-app/src/main/jniLibs
+# app/src/main/jniLibs  --  allow pre-built .so for fork
+# libdit_engine.so (~55MB, self-built) is kept local only and never committed:
+# 87% of it is ggml-hexagon HTP compute-graph constants compiled into .rodata.
+# A fresh clone must rebuild it with dit/build.sh (needs Hexagon SDK + NDK 29).
+app/src/main/jniLibs/arm64-v8a/libdit_engine.so
 app/release
 app/basic
 app/filter
-app/src/main/assets/qnnlibs
+# app/src/main/assets/qnnlibs  --  allow QNN runtime libs for fork
 app/src/main/assets/licenses/qnn-*
+# Build-provenance manifests written by tools/collect-build-info.py. They
+# describe locally built binaries, so they change on every rebuild and would
+# only ever describe the machine that committed them; each build regenerates
+# them and they ride along inside the APK, which is what the app reads.
+app/src/main/assets/build-info/
 
 # Kotlin compiler session artifacts
 .kotlin/
 
+# Build outputs at project root
+*.apk
+*.idsig
+
+# Extra runtime libraries (not compiled into APK)
+extra/
+
 app/src/main/cpp/build/
-app/src/main/assets/ditlibs
+
+.workbuddy
+.claude

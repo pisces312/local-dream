@@ -6,6 +6,27 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+// Build provenance for the About section: which commit an installed APK came
+// from, which is otherwise impossible to tell two local builds apart by. Read
+// through providers.exec so the configuration cache stays valid and the git
+// calls are tracked as inputs; a source tree without .git (a tarball, say)
+// degrades to "unknown" rather than failing the build.
+fun git(vararg args: String): String = runCatching {
+    providers.exec {
+        commandLine("git", *args)
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+}.getOrDefault("")
+
+fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+val gitCommit = git("rev-parse", "HEAD")
+val gitCommitSubject = git("log", "-1", "--pretty=%s")
+val gitCommitTime = git("log", "-1", "--pretty=%cI")
+val gitDirty = git("status", "--porcelain", "--ignore-submodules=dirty").isNotEmpty()
+
+// ── Build info ──────────────────────────────────────────────────────────────
+
 ktlint {
     android.set(true)
     version.set("1.8.0")
@@ -37,6 +58,14 @@ android {
         versionCode = 74
         versionName = "3.0.0-alpha.2"
 
+        // Surfaced in the About section. The commit time is the commit's own
+        // timestamp rather than the build's, so it stays meaningful when the
+        // configuration cache replays a build.
+        buildConfigField("String", "GIT_COMMIT", quoted(gitCommit.take(12).ifEmpty { "unknown" }))
+        buildConfigField("String", "GIT_COMMIT_SUBJECT", quoted(gitCommitSubject.ifEmpty { "unknown" }))
+        buildConfigField("String", "GIT_COMMIT_TIME", quoted(gitCommitTime.ifEmpty { "unknown" }))
+        buildConfigField("boolean", "GIT_DIRTY", gitDirty.toString())
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
@@ -49,7 +78,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(project.findProperty("RELEASE_STORE_FILE") as String? ?: "keystore.jks")
+            storeFile = project.findProperty("RELEASE_STORE_FILE")?.let { file(it as String) }
             storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
             keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
             keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
@@ -69,13 +98,25 @@ android {
     }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (project.hasProperty("RELEASE_STORE_FILE")) {
+                signingConfigs.getByName("release")
+            } else {
+                null
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "_debug"
+            // Keep the env-var-only signing rule: reuse the release keystore for
+            // debug builds only when the operator actually provides one.
+            signingConfig = if (project.hasProperty("RELEASE_STORE_FILE")) {
+                signingConfigs.getByName("release")
+            } else {
+                null
+            }
         }
     }
     compileOptions {

@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.utils.Http
 import java.io.File
@@ -65,6 +66,10 @@ class ModelDownloadService : Service() {
         // the model directory halves the space a download needs and lets an
         // interrupted one resume at file granularity.
         const val TYPE_MULTI_FILE = "multi_file"
+
+        // Download scratch dir, kept inside the models dir (see
+        // tempDownloadsDir). Leading dot: it must not be mistaken for a model.
+        const val TEMP_DIR_NAME = ".tmp_downloads"
 
         // TYPE_MULTI_FILE only: file names under EXTRA_FILE_URL, and an empty
         // marker file to create once they all arrived.
@@ -137,12 +142,7 @@ class ModelDownloadService : Service() {
             try {
                 _downloadState.value = DownloadState.Downloading(modelId, 0f, 0, 0)
 
-                val tempDir = File(filesDir, "temp_downloads")
-
-                if (tempDir.exists()) {
-                    tempDir.deleteRecursively()
-                }
-                tempDir.mkdirs()
+                val tempDir = tempDownloadsDir()
 
                 if (modelType == TYPE_MULTI_FILE) {
                     downloadPackageFiles(modelId, modelName, fileUrl, fileNames, markerFile)
@@ -180,10 +180,20 @@ class ModelDownloadService : Service() {
                             unzipFile(tempFile, extractTempDir)
 
                             extractTempDir.listFiles()?.forEach { file ->
-                                file.renameTo(File(modelDir, file.name))
+                                val destFile = File(modelDir, file.name)
+                                if (!file.renameTo(destFile)) {
+                                    file.copyTo(destFile, overwrite = true)
+                                    file.delete()
+                                }
                             }
                             extractTempDir.delete()
                             extractTempDir = null
+
+                            // Last step on purpose: isModelDownloaded() only
+                            // trusts a dir carrying this marker, so a kill
+                            // during the extract leaves a dir the UI reports
+                            // as incomplete instead of a broken model.
+                            File(modelDir, Model.COMPLETE_MARKER).createNewFile()
                         }
                     }
 
@@ -313,7 +323,9 @@ class ModelDownloadService : Service() {
      * cannot see. Files that already finished keep their final name and stay,
      * which is what lets the next attempt skip them.
      */
-    private fun discardPartialFiles(modelType: String, modelId: String) {
+    // Fork: suspend because this repo resolves the models dir from the
+    // user-configured storage path (DataStore), not a fixed location.
+    private suspend fun discardPartialFiles(modelType: String, modelId: String) {
         if (modelType != TYPE_MULTI_FILE) return
         val modelDir = File(getModelsDir(), modelId)
         modelDir.listFiles { file -> file.isFile && file.name.endsWith(".part") }
@@ -429,9 +441,27 @@ class ModelDownloadService : Service() {
         stopSelf()
     }
 
-    private fun getModelsDir(): File = File(filesDir, "models").apply {
-        if (!exists()) mkdirs()
+    private val generationPreferences by lazy { GenerationPreferences(this) }
+
+    private suspend fun getModelsDir(): File {
+        val customPath = generationPreferences.getModelsStoragePath()
+        return Model.getModelsDir(this, customPath)
     }
+
+    /**
+     * Scratch dir for the download in flight.
+     *
+     * It sits next to the models dir rather than in internal storage so the
+     * final install is a rename within one mount point. Renaming from internal
+     * storage to external storage is impossible, and the copy fallback needs
+     * room for the whole model on both sides at once — on a 2GB model that
+     * either fails outright or wastes gigabytes.
+     */
+    private suspend fun tempDownloadsDir(): File =
+        File(getModelsDir(), TEMP_DIR_NAME).apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(

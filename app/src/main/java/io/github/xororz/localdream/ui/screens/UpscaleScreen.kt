@@ -47,10 +47,10 @@ import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DownloadProgress
 import io.github.xororz.localdream.data.RemoteRepository
+import io.github.xororz.localdream.data.RuntimeManager
 import io.github.xororz.localdream.data.UpscalerRepository
 import io.github.xororz.localdream.navigation.popBackStackIfResumed
 import io.github.xororz.localdream.remote.RemoteProtocol
-import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.ModelDownloadService
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
@@ -836,7 +836,11 @@ sealed class BackendState {
 }
 
 fun prepareRuntimeDir(context: Context): File {
-    val runtimeDir = BackendService.prepareRuntimeDirRoot(context.filesDir)
+    // Fork: use the same runtime dir the generation backend resolves through
+    // RuntimeManager, so the upscaler and the generator never end up loading
+    // two different copies of the QNN runtime.
+    RuntimeManager.ensureDefaultRuntime(context)
+    val runtimeDir = RuntimeManager.getRuntimeDir(context, RuntimeManager.DEFAULT_SUBDIR)
 
     try {
         val qnnlibsAssets = context.assets.list("qnnlibs")

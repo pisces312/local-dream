@@ -75,6 +75,22 @@
     <string name="got_it">わかった</string>
     <string name="yes">はい</string>
     <string name="about_app">重要</string>
+
+    <!-- Build provenance -->
+    <string name="settings_about">このアプリについて</string>
+    <string name="build_info_title">ビルド情報</string>
+    <string name="build_info_copy">ビルド情報をコピー</string>
+    <string name="build_info_copied">ビルド情報をコピーしました</string>
+    <string name="build_info_commit">コミット %s</string>
+    <string name="build_info_commit_dirty">コミット %s（未コミットの変更あり）</string>
+    <string name="build_info_committed">コミット日時 %s</string>
+    <string name="build_info_unrecorded">記録なし</string>
+    <string name="build_info_missing">%s が見つかりません</string>
+    <string name="build_info_build_id">build-id %s</string>
+    <string name="build_info_no_build_id">build-id なし</string>
+    <string name="build_info_abi_ok">ABI 一致（v%d）</string>
+    <string name="build_info_abi_mismatch">ABI 不一致：エンジン v%d、core は v%d を期待</string>
+    <string name="build_info_abi_unknown">ABI 不明（ビルド情報なし）</string>
     <string name="must_read">このアプリは、CPU/GPU および一部の Qualcomm 製 NPU 上で Stable Diffusion による画像生成を実行できます。\n\nSD1.5 モデルは、Hexagon V68 アーキテクチャ以降の Snapdragon NPU で動作します。\n\nSDXL モデルは、Snapdragon 8 Gen 3 以降のデバイスで動作します。\n\n上記に該当しないチップでは、CPU/GPU のみでの実行となります。\n\nこのプロジェクトはオープンソースで、\nhttps://github.com/xororz/local-dream\nにてソースコードの閲覧や Issue の報告ができます。\n\nドキュメント：https://ld.chino.icu</string>
     <string name="help">ヘルプ</string>
     <string name="more_options">その他</string>
@@ -99,7 +115,7 @@
     <string name="download_model_hint">%s をダウンロードしますか？\nモデルのサイズが大きいため、Wi-Fi 環境でのダウンロードをおすすめします。\nダウンロード中はアプリを終了しないでください。\n\n現在、すべての Qualcomm 製チップ向けに NPU モデルのダウンロードを開放していますが、\nお使いのチップが古い場合、正常に動作しない可能性があります。</string>
     <string name="download_done">ダウンロード完了</string>
     <string name="unsupport_npu">お使いのデバイスは現在サポートされていません。CPU 版をご利用ください。</string>
-    <string name="cpu_models">CPU Models</string>
+    <string name="cpu_models">CPU/GPU Models</string>
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">モデルなし</string>
     <string name="no_npu_models">モデルなし</string>

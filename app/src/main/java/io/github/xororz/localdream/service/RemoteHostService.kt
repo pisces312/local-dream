@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DitResolution
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.data.PatchScanner
@@ -148,6 +149,10 @@ class RemoteHostService : Service() {
         override fun models(): JSONObject {
             val context = applicationContext
             val repository = ModelRepository.getInstance(context)
+            // Resolved once here rather than per upscaler below: /models runs on
+            // the HTTP handler thread, so every read is a blocking DataStore
+            // read on that thread.
+            val customPath = runBlocking { GenerationPreferences(context).getModelsStoragePath() }
             // Full re-scan so models downloaded/imported after host mode
             // started are visible; /models is called rarely.
             runBlocking { repository.refreshAllModels() }
@@ -156,8 +161,8 @@ class RemoteHostService : Service() {
                 useImg2img = preferences.getBoolean("use_img2img", true),
                 models = repository.models
                     .filter { it.isDownloaded }
-                    .map { model -> toRemoteInfo(context, model) },
-                upscalers = installedUpscalers(context),
+                    .map { model -> toRemoteInfo(context, model, customPath) },
+                upscalers = installedUpscalers(context, customPath),
             )
             return catalog.toJson()
         }
@@ -278,10 +283,13 @@ class RemoteHostService : Service() {
         }
     }
 
-    private fun toRemoteInfo(context: Context, model: Model): RemoteModelInfo {
+    // Fork: resolution patches are scanned from the configured models storage
+    // path, mirroring installedUpscalers below — internal-dir-only scanning
+    // would hide the patches of models stored on external storage.
+    private fun toRemoteInfo(context: Context, model: Model, customPath: String?): RemoteModelInfo {
         val defaults = model.defaults
         val resolutions = if (!model.runOnCpu && !model.usesFixedCanvas && !model.isDit) {
-            val patches = PatchScanner.scanAvailableResolutions(context, model.id)
+            val patches = PatchScanner.scanAvailableResolutions(context, model.id, customPath)
             (listOf(Pair(512, 512)) + patches.map { Pair(it.width, it.height) })
                 .distinct()
         } else {
@@ -311,9 +319,15 @@ class RemoteHostService : Service() {
     // Upscalers installed on this device, with the absolute weight paths the
     // native /upscale endpoint expects in X-Upscaler-Path. The controller
     // echoes the path back when it requests a remote upscale.
-    private fun installedUpscalers(context: Context): List<RemoteUpscalerInfo> = UPSCALER_IDS.mapNotNull { id ->
-        if (!Model.isUpscalerDownloaded(context, id)) return@mapNotNull null
-        val file = File(File(Model.getModelsDir(context), id), Model.UPSCALER_FILE_NAME)
+    // Fork: honour the user-configured models storage path, otherwise a host
+    // would advertise upscalers from the internal dir even when the models
+    // live on external storage.
+    private fun installedUpscalers(
+        context: Context,
+        customPath: String?,
+    ): List<RemoteUpscalerInfo> = UPSCALER_IDS.mapNotNull { id ->
+        if (!Model.isUpscalerDownloaded(context, id, customPath)) return@mapNotNull null
+        val file = File(File(Model.getModelsDir(context, customPath), id), Model.UPSCALER_FILE_NAME)
         RemoteUpscalerInfo(id = id, path = file.absolutePath)
     }
 

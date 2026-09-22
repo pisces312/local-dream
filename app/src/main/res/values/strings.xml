@@ -77,6 +77,22 @@
     <string name="got_it">Got It!</string>
     <string name="yes">Yes</string>
     <string name="about_app">Note</string>
+
+    <!-- Build provenance -->
+    <string name="settings_about">About</string>
+    <string name="build_info_title">Build info</string>
+    <string name="build_info_copy">Copy build info</string>
+    <string name="build_info_copied">Build info copied</string>
+    <string name="build_info_commit">commit %s</string>
+    <string name="build_info_commit_dirty">commit %s (dirty)</string>
+    <string name="build_info_committed">committed %s</string>
+    <string name="build_info_unrecorded">not recorded</string>
+    <string name="build_info_missing">%s missing</string>
+    <string name="build_info_build_id">build-id %s</string>
+    <string name="build_info_no_build_id">no build-id</string>
+    <string name="build_info_abi_ok">ABI matches (v%d)</string>
+    <string name="build_info_abi_mismatch">ABI mismatch: engine v%d, core expects v%d</string>
+    <string name="build_info_abi_unknown">ABI unknown (build info missing)</string>
     <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nSD1.5 models are supported on Snapdragon NPUs with Hexagon V68 architecture or newer.\n\nSDXL models are supported on Snapdragon 8 Gen 3 and newer devices.\n\nIf your chip is outside the above scope, you can only run on CPU/GPU.\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues\n\nDocumentation: https://ld.chino.icu</string>
     <string name="help">Help</string>
     <string name="more_options">More</string>
@@ -102,7 +118,7 @@
     <string name="download_model_hint">Are you sure to download %s ? Please do not exit the application during the download process.\n\nWe currently allow NPU model downloads for all Qualcomm chips, but older chips may not be able to run them.</string>
     <string name="download_done">Download Finished</string>
     <string name="unsupport_npu">Your device is not supported. Try the CPU model please.</string>
-    <string name="cpu_models">CPU Models</string>
+    <string name="cpu_models">CPU/GPU Models</string>
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">No Models</string>
     <string name="no_npu_models">No Models</string>
@@ -246,6 +262,7 @@
     <string name="delete_file_confirm">Are you sure you want to delete the file \"%s\"?</string>
     <string name="file_deleted">File deleted successfully</string>
     <string name="no_model_files">No model files found</string>
+    <string name="file_manager_scope_hint">App-internal files only. Models kept in a custom storage directory are not listed here.</string>
     <string name="loading_files">Loading files…</string>
     <string name="back_to_folders">Back to Folders</string>
     <string name="model_folder">Model: %s</string>
@@ -362,6 +379,10 @@
     <string name="aspect_ratio_custom_hint">Enter two positive integers (e.g. 21 9)</string>
     <string name="aspect_ratio_invalid">Invalid ratio. Must be two positive integers.</string>
     <string name="scheduler">Scheduler</string>
+    <string name="runtime_lib">Runtime Library</string>
+    <string name="runtime_import_folder">Import Runtime Folder</string>
+    <string name="runtime_import_success">Runtime \"%s\" imported successfully</string>
+    <string name="runtime_import_exists">Runtime \"%s\" already exists</string>
     <string name="extracting">Extracting…</string>
 
     <!-- History migration -->
@@ -457,6 +478,41 @@
     <string name="clean_temp_confirm">Free up %s of temporary files (interrupted downloads and scratch buffers)?</string>
     <string name="clean_temp_none">No temporary files to clean</string>
     <string name="clean_temp_done">Freed %s</string>
+    <!-- Models storage path -->
+    <string name="models_storage_title">Model Storage Location</string>
+    <string name="models_storage_desc">Choose where downloaded models are stored. Existing models will be moved to the new location.</string>
+    <string name="models_storage_internal">Internal storage (default)</string>
+    <string name="models_storage_app_external">App-specific external storage</string>
+    <string name="models_storage_custom">Custom directory</string>
+    <string name="models_storage_pick_dir">Pick directory</string>
+    <string name="models_storage_apply">Apply</string>
+    <string name="models_storage_migrating">Migrating\u2026</string>
+    <string name="models_storage_migrating_progress">Moving model files\u2026</string>
+    <string name="models_storage_migrate_done">Migration complete</string>
+    <string name="models_storage_migrate_incomplete">Migration finished, but some files could not be verified and were left in the old location.</string>
+    <string name="models_storage_migrate_failed">Migration failed: %s</string>
+    <string name="models_storage_path_unresolvable">Cannot resolve selected directory to a filesystem path</string>
+    <string name="models_storage_unavailable">Model storage is unavailable (%1$s); models are being read from internal storage. Check the all-files access permission or the directory, then reopen this screen.</string>
+    <string name="models_storage_path_not_allowed">That directory is not suitable for model storage. Pick an empty directory or an app-dedicated folder instead.</string>
+    <string name="models_storage_download_active">A model is downloading or extracting. Wait for it to finish before changing the storage location.</string>
+    <string name="models_storage_backend_active">A model is running. Stop it before changing the storage location.</string>
+    <string name="models_storage_path_unusable">Storage location %1$s is not accessible; migration was not started.</string>
+    <string name="download_model_fallback_hint">The configured storage location is unavailable, so %s will be installed into internal storage.\n\nAre you sure to continue? Please do not exit the application during the download process.</string>
+    <string name="permission_all_files_desc">Model export/import requires access to all files. Please grant the permission in settings.</string>
+
+    <!-- File Manager -->
+    <string name="no_files">No files found</string>
+    <string name="export_success">Export completed</string>
+    <string name="export_failed">Export failed</string>
+    <string name="exporting">Exporting…</string>
+    <string name="export_file">Export</string>
+    <string name="delete_warning_title">Delete Warning</string>
+    <string name="delete_warning_text">Deleting "%s" may cause the app to malfunction. Are you sure?</string>
+    <string name="delete_anyway">Delete Anyway</string>
+    <string name="import_file">Import</string>
+    <string name="importing">Importing…</string>
+    <string name="import_success">Import completed</string>
+    <string name="import_failed">Import failed</string>
 
     <!-- Device link (remote control between two devices) -->
     <string name="remote_link">Device link</string>

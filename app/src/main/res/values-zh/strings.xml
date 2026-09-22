@@ -75,6 +75,22 @@
     <string name="got_it">知道了!</string>
     <string name="yes">是</string>
     <string name="about_app">须知</string>
+
+    <!-- Build provenance -->
+    <string name="settings_about">关于</string>
+    <string name="build_info_title">构建信息</string>
+    <string name="build_info_copy">复制构建信息</string>
+    <string name="build_info_copied">已复制构建信息</string>
+    <string name="build_info_commit">提交 %s</string>
+    <string name="build_info_commit_dirty">提交 %s（有未提交改动）</string>
+    <string name="build_info_committed">提交于 %s</string>
+    <string name="build_info_unrecorded">未记录</string>
+    <string name="build_info_missing">%s 缺失</string>
+    <string name="build_info_build_id">build-id %s</string>
+    <string name="build_info_no_build_id">无 build-id</string>
+    <string name="build_info_abi_ok">ABI 一致（v%d）</string>
+    <string name="build_info_abi_mismatch">ABI 不一致：引擎 v%d，core 期望 v%d</string>
+    <string name="build_info_abi_unknown">ABI 无法判定（缺少构建信息）</string>
     <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n支持在 Hexagon V68 架构及以上的骁龙 NPU 上运行 SD1.5 模型。\n\n支持在骁龙 8 Gen 3 及更新的设备上运行 SDXL 模型。\n\n若您的芯片不在上述范围内，则只能使用 CPU/GPU 运行。\n\n本项目在 https://github.com/xororz/local-dream 开源，可以在github上查看源代码或提交问题\n\n文档：https://ld.chino.icu</string>
     <string name="help">帮助</string>
     <string name="more_options">更多</string>
@@ -97,9 +113,14 @@
     <string name="cannot_download_hint">当前有模型正在下载，请等待下载完成后再尝试</string>
     <string name="download_model">下载模型</string>
     <string name="download_model_hint">确定要下载 %s 吗？模型较大，建议使用WiFi网络下载。下载过程请勿退出应用程序。\n\n我们目前对所有高通芯片开放NPU模型下载，如果你的芯片较旧，可能无法运行</string>
+    <string name="download_model_fallback_hint">配置的存储位置当前不可用，%s 将被安装到内置存储。\n\n确定要继续吗？下载过程中请勿退出应用程序。</string>
+    <string name="models_storage_path_not_allowed">该目录不适合存放模型文件，请选择空目录或应用专用目录。</string>
+    <string name="models_storage_download_active">正在下载或解压模型，请等待完成后再更改存储位置。</string>
+    <string name="models_storage_backend_active">模型正在运行，请先停止再更改存储位置。</string>
+    <string name="models_storage_path_unusable">存储位置 %1$s 无法访问，已取消迁移。</string>
     <string name="download_done">模型下载完成</string>
     <string name="unsupport_npu">您的设备暂不支持，请使用CPU版本</string>
-    <string name="cpu_models">CPU Models</string>
+    <string name="cpu_models">CPU/GPU 模型</string>
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">暂无模型</string>
     <string name="no_npu_models">暂无模型</string>
@@ -447,6 +468,12 @@
     <string name="clean_temp_confirm">清理 %s 临时文件（中断的下载和临时缓冲）？</string>
     <string name="clean_temp_none">没有可清理的临时文件</string>
     <string name="clean_temp_done">已释放 %s</string>
+
+    <!-- Runtime -->
+    <string name="runtime_lib">运行时库</string>
+    <string name="runtime_import_folder">导入运行时文件夹</string>
+    <string name="runtime_import_success">运行时导入成功</string>
+    <string name="runtime_import_exists">同名运行时已存在</string>
 
     <!-- Device link (remote control between two devices) -->
     <string name="remote_link">设备互联</string>

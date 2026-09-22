@@ -1,15 +1,19 @@
 package io.github.xororz.localdream.service
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DitEngine
 import io.github.xororz.localdream.data.DitResolution
+import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.Model
+import io.github.xororz.localdream.data.RuntimeManager
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -26,6 +30,11 @@ import kotlinx.coroutines.launch
 class BackendService : Service() {
     @Volatile
     private var process: Process? = null
+
+    // Keep CPU awake while the native backend is running, so the C++ inference
+    // process is not frozen by App Standby / Freezer cgroup when the app is
+    // backgrounded. Released in onDestroy().
+    private var wakeLock: PowerManager.WakeLock? = null
 
     // Set true around an intentional teardown (and reset just before a new
     // start) so the monitor thread doesn't surface the resulting process exit
@@ -59,9 +68,6 @@ class BackendService : Service() {
     companion object {
         private const val TAG = "BackendService"
         private const val EXECUTABLE_NAME = "libstable_diffusion_core.so"
-        const val RUNTIME_DIR = "runtime_libs"
-        private const val RUNTIME_VERSION = "qnn_2_50_0_260828"
-        private const val RUNTIME_VERSION_FILE = ".runtime_version"
         private const val NOTIFICATION_ID = 2
         private const val CHANNEL_ID = "backend_service_channel"
 
@@ -91,25 +97,6 @@ class BackendService : Service() {
         // --type values served by the downloadable DiT engine.
         fun isDitBackend(backendType: String): Boolean = backendType == "zimage" ||
             backendType == "klein"
-
-        // One reused dir, stamped with the SDK it holds. Per-file copying only
-        // refreshes libs whose size changed, so an SDK bump would otherwise
-        // leave same-size stale libs and libs the new SDK dropped behind;
-        // wiping on a stamp mismatch keeps the dir exactly one version's worth.
-        fun prepareRuntimeDirRoot(filesDir: File): File {
-            val runtimeDir = File(filesDir, RUNTIME_DIR)
-            val stamp = File(runtimeDir, RUNTIME_VERSION_FILE)
-            if (runtimeDir.exists() &&
-                runCatching { stamp.readText() }.getOrNull() != RUNTIME_VERSION
-            ) {
-                Log.i(TAG, "Runtime dir holds another SDK version, wiping")
-                runtimeDir.deleteRecursively()
-            }
-            if (!runtimeDir.exists()) runtimeDir.mkdirs()
-            runCatching { stamp.writeText(RUNTIME_VERSION) }
-                .onFailure { Log.w(TAG, "Write runtime version stamp failed", it) }
-            return runtimeDir
-        }
 
         private object StateHolder {
             val _backendState = MutableStateFlow<BackendState>(BackendState.Idle)
@@ -164,6 +151,7 @@ class BackendService : Service() {
         val backendType: String,
         val width: Int,
         val height: Int,
+        val runtimeDirName: String? = null,
         val listenOnAll: Boolean,
     )
 
@@ -225,6 +213,8 @@ class BackendService : Service() {
                 "unsupported DiT resolution ${requestedWidth}x$requestedHeight; using ${width}x$height",
             )
         }
+        // Fork: per-runtime native library directory (see RuntimeManager).
+        val runtimeDirName = intent.getStringExtra("runtimeDirName")
         // Host mode is read from RemoteHostService's in-process state, not a
         // persisted flag: a crash can never leave a stale "expose the port"
         // bit behind, and a config-equality check below forces a restart when
@@ -232,7 +222,7 @@ class BackendService : Service() {
         val listenOnAll = getSharedPreferences("app_prefs", MODE_PRIVATE)
             .getBoolean("listen_on_all_addresses", false) ||
             RemoteHostService.isRunning.value
-        return BackendConfig(modelId, backendType, width, height, listenOnAll)
+        return BackendConfig(modelId, backendType, width, height, runtimeDirName, listenOnAll)
     }
 
     // Declares the desired backend and converges to it. Cancels any pending
@@ -298,6 +288,7 @@ class BackendService : Service() {
             serving = want
             updateServing(want)
             updateState(BackendState.Running)
+            acquireWakeLock()
         } else {
             serving = null
             updateServing(null)
@@ -364,7 +355,14 @@ class BackendService : Service() {
 
     private fun prepareRuntimeDir() {
         try {
-            runtimeDir = prepareRuntimeDirRoot(filesDir)
+            // Fork: runtimes live under filesDir/runtime_libs/<name> and can be
+            // imported from external storage (see RuntimeManager).
+            RuntimeManager.ensureDefaultRuntime(this)
+            runtimeDir = RuntimeManager.getRuntimeDir(this, RuntimeManager.DEFAULT_SUBDIR)
+            runtimeDir.listFiles()?.filter { it.name.endsWith(".so") }?.forEach {
+                it.setReadable(true, true)
+                it.setExecutable(true, true)
+            }
 
             try {
                 val qnnlibsAssets = assets.list("qnnlibs")
@@ -421,6 +419,7 @@ class BackendService : Service() {
                 Log.e(TAG, "Failed to prepare QNN libraries from assets", e)
                 throw RuntimeException("Failed to prepare QNN libraries from assets", e)
             }
+            Log.i(TAG, "QNN libraries prepared in runtime directory")
 
             if (BuildConfig.FLAVOR == "filter") {
                 try {
@@ -453,8 +452,8 @@ class BackendService : Service() {
             runtimeDir.setExecutable(true, true)
             runtimeDirReady = true
 
-            Log.i(TAG, "Runtime directory prepared: ${runtimeDir.absolutePath}")
-            Log.i(TAG, "Runtime files: ${runtimeDir.list()?.joinToString()}")
+            Log.i(TAG, "Default runtime dir: ${runtimeDir.absolutePath}")
+            Log.i(TAG, "Available runtimes: ${RuntimeManager.listAvailableRuntimes(this).map { it.name }}")
         } catch (e: Exception) {
             Log.e(TAG, "Prepare runtime dir failed", e)
             updateState(BackendState.Error("Prepare runtime dir failed: ${e.message}"))
@@ -466,7 +465,8 @@ class BackendService : Service() {
         val backendType = config.backendType
         val width = config.width
         val height = config.height
-        Log.i(TAG, "backend start, model: $modelId, resolution: $width×$height")
+        val resolvedRuntimeDir = RuntimeManager.getRuntimeDir(this, config.runtimeDirName)
+        Log.i(TAG, "backend start, model: $modelId, resolution: $width×$height, runtime: ${resolvedRuntimeDir.name}")
 
         // reconcile() has already stopped any previous process; just re-arm
         // crash reporting for the process we are about to start.
@@ -475,7 +475,12 @@ class BackendService : Service() {
 
         try {
             val nativeDir = applicationInfo.nativeLibraryDir
-            val modelsDir = File(Model.getModelsDir(this), modelId)
+            val customPath = runCatching {
+                kotlinx.coroutines.runBlocking {
+                    GenerationPreferences(this@BackendService).getModelsStoragePath()
+                }
+            }.getOrNull()
+            val modelsDir = File(Model.getModelsDir(this, customPath), modelId)
 
             val executableFile = File(nativeDir, EXECUTABLE_NAME)
 
@@ -499,7 +504,7 @@ class BackendService : Service() {
                     executableFile.absolutePath,
                     "--upscaler_mode",
                     "--lib_dir",
-                    runtimeDir.absolutePath,
+                    resolvedRuntimeDir.absolutePath,
                     "--port",
                     "8081",
                 )
@@ -527,7 +532,8 @@ class BackendService : Service() {
             } else if (backendType != "sd15cpu" && backendType != "sdxlmnn" &&
                 backendType != BACKEND_TYPE_UPSCALER
             ) {
-                command += listOf("--lib_dir", runtimeDir.absolutePath)
+                // Fork: honour the runtime dir chosen in Advanced settings.
+                command += listOf("--lib_dir", resolvedRuntimeDir.absolutePath)
             }
             if (!useImg2img && backendType != BACKEND_TYPE_UPSCALER) {
                 command += "--no_img2img"
@@ -585,7 +591,7 @@ class BackendService : Service() {
             val env = mutableMapOf<String, String>()
 
             val systemLibPaths = mutableListOf(
-                runtimeDir.absolutePath,
+                resolvedRuntimeDir.absolutePath,
                 "/system/lib64",
                 "/vendor/lib64",
                 "/vendor/lib64/egl",
@@ -615,7 +621,7 @@ class BackendService : Service() {
             }
             val systemLibPathsStr = systemLibPaths.joinToString(":")
             env["LD_LIBRARY_PATH"] = systemLibPathsStr
-            env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+            env["DSP_LIBRARY_PATH"] = resolvedRuntimeDir.absolutePath
             if (ditEngineDir != null) {
                 // ggml-hexagon asks FastRPC for its skel by bare name, so both
                 // the runtime directory holding the skels and the platform
@@ -623,7 +629,7 @@ class BackendService : Service() {
                 // defaults would leave the skel unable to resolve the libraries
                 // it links against.
                 val dspPath = listOf(
-                    runtimeDir.absolutePath,
+                    resolvedRuntimeDir.absolutePath,
                     "/vendor/lib/rfsa/adsp",
                     "/vendor/dsp/cdsp",
                     "/dsp",
@@ -638,7 +644,7 @@ class BackendService : Service() {
             }
 
             Log.d(TAG, "COMMAND: ${command.joinToString(" ")}")
-            Log.d(TAG, "DIR: $runtimeDir")
+            Log.d(TAG, "DIR: $resolvedRuntimeDir")
             Log.d(TAG, "LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}")
             Log.d(TAG, "DSP_LIBRARY_PATH=${env["DSP_LIBRARY_PATH"]}")
 
@@ -702,6 +708,29 @@ class BackendService : Service() {
     // progress, i.e. its exit really is an unexpected crash worth reporting.
     private fun isLiveCrash(proc: Process): Boolean = !stopping && process === proc
 
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "localdream:backend_inference",
+            ).apply {
+                setReferenceCounted(false)
+                acquire(10 * 60 * 1000L) // 10-minute timeout as safety net
+            }
+        Log.i(TAG, "WakeLock acquired")
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.i(TAG, "WakeLock released")
+            }
+        }
+        wakeLock = null
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // The scope is never cancelled, so this job still runs after
@@ -739,5 +768,6 @@ class BackendService : Service() {
         }
         serving = null
         updateServing(null)
+        releaseWakeLock()
     }
 }

@@ -29,12 +29,15 @@ class GenerationPreferences(private val context: Context) {
     private fun getBatchCountsKey(modelId: String) = intPreferencesKey("${modelId}_batch_counts")
     private fun getSchedulerKey(modelId: String) = stringPreferencesKey("${modelId}_scheduler")
     private fun getAspectRatioKey(modelId: String) = stringPreferencesKey("${modelId}_aspect_ratio")
+    private fun getRuntimeDirKey(modelId: String) = stringPreferencesKey("${modelId}_runtime_dir")
 
     private val BASE_URL_KEY = stringPreferencesKey("base_url")
     private val SELECTED_SOURCE_KEY = stringPreferencesKey("selected_source")
     private val SHARE_USE_BASE64_KEY = booleanPreferencesKey("share_use_base64")
     private val SHARE_CLEAR_CLIPBOARD_KEY =
         booleanPreferencesKey("share_clear_clipboard_on_import")
+
+    private val MODELS_STORAGE_PATH_KEY = stringPreferencesKey("models_storage_path")
 
     // UltraFix step/denoise are per-model (each model keeps its own repair
     // recipe), independent of that model's main generation params. Denoise is
@@ -101,6 +104,26 @@ class GenerationPreferences(private val context: Context) {
         }
     }
 
+    fun observeModelsStoragePath(): Flow<String?> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { it[MODELS_STORAGE_PATH_KEY] }
+
+    suspend fun getModelsStoragePath(): String? = context.dataStore.data
+        .map { it[MODELS_STORAGE_PATH_KEY] }
+        .first()
+
+    suspend fun saveModelsStoragePath(path: String?) {
+        context.dataStore.edit { preferences ->
+            if (path != null) {
+                preferences[MODELS_STORAGE_PATH_KEY] = path
+            } else {
+                preferences.remove(MODELS_STORAGE_PATH_KEY)
+            }
+        }
+    }
+
     suspend fun getBaseUrl(): String = context.dataStore.data
         .map { preferences ->
             preferences[BASE_URL_KEY] ?: "https://huggingface.co/"
@@ -131,6 +154,7 @@ class GenerationPreferences(private val context: Context) {
         batchCounts: Int,
         scheduler: String,
         aspectRatio: String = "1:1",
+        runtimeDir: String? = null,
     ) {
         context.dataStore.edit { preferences ->
             preferences[getPromptKey(modelId)] = prompt
@@ -145,6 +169,11 @@ class GenerationPreferences(private val context: Context) {
             preferences[getBatchCountsKey(modelId)] = batchCounts
             preferences[getSchedulerKey(modelId)] = scheduler
             preferences[getAspectRatioKey(modelId)] = aspectRatio
+            if (runtimeDir != null) {
+                preferences[getRuntimeDirKey(modelId)] = runtimeDir
+            } else {
+                preferences.remove(getRuntimeDirKey(modelId))
+            }
         }
     }
 
@@ -179,6 +208,7 @@ class GenerationPreferences(private val context: Context) {
                 batchCounts = preferences[getBatchCountsKey(modelId)] ?: global.batchCounts,
                 scheduler = preferences[getSchedulerKey(modelId)] ?: global.scheduler,
                 aspectRatio = preferences[getAspectRatioKey(modelId)] ?: global.aspectRatio,
+                runtimeDir = preferences[getRuntimeDirKey(modelId)],
             )
         }
 
@@ -231,6 +261,7 @@ class GenerationPreferences(private val context: Context) {
             preferences.remove(getBatchCountsKey(modelId))
             preferences.remove(getSchedulerKey(modelId))
             preferences.remove(getAspectRatioKey(modelId))
+            preferences.remove(getRuntimeDirKey(modelId))
             preferences.remove(getUltrafixStepsKey(modelId))
             preferences.remove(getUltrafixDenoiseStepsKey(modelId))
         }
@@ -254,4 +285,5 @@ data class GenerationPrefs(
     val batchCounts: Int = GenerationDefaults.GLOBAL.batchCounts,
     val scheduler: String = GenerationDefaults.GLOBAL.scheduler,
     val aspectRatio: String = GenerationDefaults.GLOBAL.aspectRatio,
+    val runtimeDir: String? = null,
 )

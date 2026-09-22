@@ -5,7 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Build and package against the same QNN SDK revision.
+# Fork note: QAIRT_PATH is the env var used by the local build scripts, accept
+# it as a fallback so build.sh / build-sm8850.sh keep working unchanged.
 set(QNN_SDK_ROOT "$ENV{QNN_SDK_ROOT}" CACHE PATH "Qualcomm AI Runtime SDK 2.50.0.260828")
+if(NOT QNN_SDK_ROOT)
+  set(QNN_SDK_ROOT "$ENV{QAIRT_PATH}")
+endif()
 set(SAMPLE_APP_DIR "${CMAKE_CURRENT_BINARY_DIR}/3rdparty/SampleApp")
 file(COPY "${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/"
     DESTINATION "${SAMPLE_APP_DIR}")
@@ -35,9 +40,14 @@ foreach(arch 68 69 73 75 79 81)
         DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/qnnlibs")
 endforeach()
 
-if(WIN32)
+# Detect HOST OS (not target). When cross-compiling to Android, WIN32 reflects
+# the TARGET, so use CMAKE_HOST_WIN32 instead.
+if(CMAKE_HOST_WIN32)
     set(PLATFORM_NAME "windows")
     set(HOST_TAG "windows-x86_64")
+elseif(CMAKE_HOST_APPLE)
+    set(PLATFORM_NAME "darwin")
+    set(HOST_TAG "darwin-x86_64")
 else()
     set(PLATFORM_NAME "linux")
     set(HOST_TAG "linux-x86_64")

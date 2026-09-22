@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+#ifdef __linux__
+#include <sys/resource.h>
+#endif
+
 #include "Config.hpp"
 #include "MnnUtils.hpp"
 #include "Pipeline.hpp"
@@ -743,6 +747,12 @@ static void registerTokenizeEndpoint(httplib::Server &svr,
 }
 
 int main(int argc, char **argv) {
+  // Bump process priority to reduce likelihood of freeze when app is
+  // backgrounded (Android Freezer cgroup / App Standby).
+#ifdef __linux__
+  setpriority(PRIO_PROCESS, 0, -20);
+#endif
+
   if (!qnn::log::initializeLogging()) {
     std::cerr << "ERROR: Init logging failed!\n";
     return EXIT_FAILURE;
