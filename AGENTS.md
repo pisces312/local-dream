@@ -21,17 +21,76 @@ app/src/main/
 |---|---|
 | QAIRT SDK | `D:/dev/qairt/2.50.0.260828` |
 | Android NDK | `D:/dev/android_sdk/ndk/28.2.13676358` |
+| Android SDK | `D:/dev/android_sdk`（`ANDROID_HOME`） |
 | CMake | `D:/dev/android_sdk/cmake/3.22.1/bin/cmake.exe` |
 | Ninja | `D:/dev/android_sdk/cmake/3.22.1/bin/ninja.exe` |
+| JDK | `D:/dev/AndroidStudio/jbr`（`JAVA_HOME`；Git Bash 里已默认是它） |
+| Git / Git Bash | `D:/dev/git`（bash: `D:/dev/git/bin/bash.exe`） |
+| Python | `D:/dev/miniconda3/python.exe` |
 | Rust | `D:/dev/rust` (1.96.0, target: aarch64-linux-android) |
+| DiT 构建 | WSL2 + Hexagon SDK `~/hexagon-sdk-v6.6.0.0` + NDK r29 |
 
-## 快速构建
+## 构建
+
+### 各脚本的执行环境（不要混用）
+
+| 脚本 | 必须在哪跑 | 原因 |
+|---|---|---|
+| `build-sm8850.sh` | **Git Bash**（`D:\dev\git\bin\bash.exe`） | 依赖 `cygpath`、免扩展名调用 `zipalign`/Windows 工具；不是 WSL、不是 PowerShell |
+| `build.bat` | Windows CMD 或 PowerShell | 纯 bat |
+| `rebuild-native.bat` / `app/src/main/cpp/build.bat` | Windows CMD | 纯 bat |
+| `app/src/main/cpp/build.sh` | Git Bash | `cygpath` + 调 `cmake.exe` |
+| `app/src/main/cpp/dit/build.sh` | **WSL2** | 需 Hexagon SDK / NDK r29 Linux 工具链 |
+
+AI/脚本调 Git Bash 时直接指到绝对路径，避免 `bash` 解析到 WSL：
 
 ```bash
-# 1. 编译 native .so
-#    AI 工具执行时：在 Git Bash 里直调下面的 cmake.exe，不要走 PowerShell 工具（会被沙箱
-#    静默拦截：零输出秒退）；并先 export MSYS2_ARG_CONV_EXCL='*' 关掉参数路径转换。
-#    详见 docs/2026-09-19-dit-engine-build.md 踩坑记录第 7 条。
+D:/dev/git/bin/bash.exe build-sm8850.sh debug basic
+```
+
+WSL 里没有 `cygpath`，且 `zipalign` 是 Windows PE，**不要**在 WSL 执行 `build-sm8850.sh`。
+
+### 选哪条打包命令
+
+| 场景 | 命令（Git Bash） | 包内 native |
+|---|---|---|
+| SM8850 真机自用 / 调试（**默认**） | `./build-sm8850.sh debug basic` | 只留 V81（QNN + DiT skel） |
+| SM8850 对外分发 | `./build-sm8850.sh release basic` | 同上 |
+| 多机型通用包 | `build.bat debug\|release basic\|filter` | 全部 qnnlibs arch（~156MB） |
+
+`build-sm8850.sh` 会在打包后剥掉非 V81 的 `assets/qnnlibs/*` 与 `assets/ditlibs/*` 再重签；
+源目录 `assets/` 不受影响。产物在仓库根目录：
+`LocalDream_armv8a_<versionName>-basic-sm8850-debug.apk` 或 `…-sm8850-signed.apk`
+（文件名用 gradle 的 `versionName`，不含 `_debug` 后缀）。
+
+签名约定：
+
+| 构建 | 证书 | 签名方案 |
+|---|---|---|
+| **debug** | `~/.android/debug.keystore`（`androiddebugkey` / `android`），无需 export | **v3** |
+| **release** | `KEY_STORE` 环境变量（见下文），必须 export | v2（脚本固定；可再开 v3） |
+
+debug **不**用 release 证书。从旧的 `CN=pisces312` debug 包升级时必须先
+`adb uninstall io.github.xororz.localdream.debug`。
+
+Honor 文件管理器只认 META-INF/v1，对 v3-only 可能报「未包含任何证书」——用
+`adb install -r` 即可。
+
+`-d <ip:port>` 可在打包后 `adb install` 到指定设备。
+
+debug 包 applicationId 带 `.debug` 后缀，与正式版并存。
+
+### 何时要动 native（一般打包不必）
+
+只改 Kotlin/Compose / 资源 / 打包脚本 → 直接打 APK，不必重编 `.so`。
+
+改了 `app/src/main/cpp/` 或 `DitEngine.h` ABI 才需要：
+
+```bash
+# core（libstable_diffusion_core.so + qnnlibs）
+#   AI 工具执行时：在 Git Bash 里直调 cmake.exe，不要走 PowerShell 工具（会被沙箱
+#   静默拦截：零输出秒退）；并先 export MSYS2_ARG_CONV_EXCL='*'。
+#   详见 docs/2026-09-19-dit-engine-build.md 踩坑记录第 7 条。
 rebuild-native.bat    # Windows CMD, 或手动:
 export ANDROID_NDK_ROOT=D:/dev/android_sdk/ndk/28.2.13676358
 export QAIRT_PATH=D:/dev/qairt/2.50.0.260828
@@ -46,10 +105,8 @@ cp -r build/android/qnnlibs/* ../../assets/qnnlibs/
 # 若走的是上面手动 cmake（而非 cpp/build.sh），必须补写 build-info，见下文
 # 「Native 重建必须同步 build-info」。
 
-# 2. 构建 APK
-build.bat release basic         # 通用 APK（含全部 qnnlibs，约 156MB）
-build-sm8850.sh release basic   # SM8850 精简 APK（只留 V81；debug 同理：
-                                #   build-sm8850.sh debug basic）
+# DiT engine（libdit_engine.so + HTP skels）— WSL2 + Hexagon SDK，见
+# docs/2026-09-19-dit-engine-build.md。ABI 变更时两侧都要重建。
 ```
 
 ## 正式版（release）签名必须走环境变量
@@ -59,6 +116,8 @@ build-sm8850.sh release basic   # SM8850 精简 APK（只留 V81；debug 同理�
 
 未设置签名变量时，release 构建仍可产出 **unsigned** APK（便于本机调试）；需要安装/分发时
 必须补齐下列变量后再打包或用 apksigner 重签。
+
+release 构建（含 `build-sm8850.sh release`）需要这些变量。debug 不需要。
 
 ### Gradle 签名（`app/build.gradle.kts` 的 `signingConfigs.release`）
 

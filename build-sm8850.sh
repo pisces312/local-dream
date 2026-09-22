@@ -129,9 +129,28 @@ else
     OUTPUT_APK="$PROJECT_DIR/LocalDream_armv8a_${VERSION}-${FLAVOR}-sm8850-debug.apk"
 fi
 
-KEYSTORE="${KEY_STORE:-}"
-KEYSTORE_PASS="${KEY_STORE_PASSWORD:-}"
-KEY_ALIAS="${KEY_ALIAS:-pisces312}"
+KEYSTORE=""
+KEYSTORE_PASS=""
+KEY_ALIAS=""
+if [[ "$BUILD_TYPE" == "release" ]]; then
+    # Release: operator keystore only (see AGENTS.md; never hardcode).
+    KEYSTORE="${KEY_STORE:-}"
+    KEYSTORE_PASS="${KEY_STORE_PASSWORD:-}"
+    KEY_ALIAS="${KEY_ALIAS:-pisces312}"
+else
+    # Debug convention: standard Android debug key + APK Signature Scheme v3.
+    # Uninstall any old pisces312-signed debug first — cert change blocks update.
+    KEYSTORE="${DEBUG_KEY_STORE:-$HOME/.android/debug.keystore}"
+    KEYSTORE_PASS="${DEBUG_KEY_STORE_PASSWORD:-android}"
+    KEY_ALIAS="${DEBUG_KEY_ALIAS:-androiddebugkey}"
+fi
+
+if [[ -z "$KEYSTORE" || ! -f "$KEYSTORE" ]]; then
+    echo "ERROR: keystore not found: '$KEYSTORE'"
+    echo "  release: export KEY_STORE=... KEY_STORE_PASSWORD=..."
+    echo "  debug:   expected $HOME/.android/debug.keystore (or DEBUG_KEY_STORE)"
+    exit 1
+fi
 
 # zipalign / apksigner are native Windows tools too: give them Windows paths.
 ALIGNED_APK_WIN="$(cygpath -w "$ALIGNED_APK")"
@@ -141,13 +160,34 @@ echo "=== Aligning ==="
 "$BUILD_TOOLS/zipalign" -f 4 "$SOURCE_APK_WIN" "$ALIGNED_APK_WIN"
 
 echo "=== Signing ==="
-java -jar "$BUILD_TOOLS/lib/apksigner.jar" sign \
-    --ks "$KEYSTORE" \
-    --ks-pass "pass:$KEYSTORE_PASS" \
-    --ks-key-alias "$KEY_ALIAS" \
-    --key-pass "pass:$KEYSTORE_PASS" \
-    --out "$OUTPUT_APK_WIN" \
-    "$ALIGNED_APK_WIN"
+# Debug convention: APK Signature Scheme v3 + debug.keystore (see AGENTS.md).
+# Honor's file-manager installer only parses META-INF/v1 and may report
+# "no certificates" for v3-only — use adb install -r in that case.
+if [[ "$BUILD_TYPE" == "release" ]]; then
+    java -jar "$BUILD_TOOLS/lib/apksigner.jar" sign \
+        --min-sdk-version 24 \
+        --v1-signing-enabled false \
+        --v2-signing-enabled true \
+        --v3-signing-enabled true \
+        --ks "$KEYSTORE" \
+        --ks-pass "pass:$KEYSTORE_PASS" \
+        --ks-key-alias "$KEY_ALIAS" \
+        --key-pass "pass:$KEYSTORE_PASS" \
+        --out "$OUTPUT_APK_WIN" \
+        "$ALIGNED_APK_WIN"
+else
+    java -jar "$BUILD_TOOLS/lib/apksigner.jar" sign \
+        --min-sdk-version 24 \
+        --v1-signing-enabled false \
+        --v2-signing-enabled false \
+        --v3-signing-enabled true \
+        --ks "$KEYSTORE" \
+        --ks-pass "pass:$KEYSTORE_PASS" \
+        --ks-key-alias "$KEY_ALIAS" \
+        --key-pass "pass:$KEYSTORE_PASS" \
+        --out "$OUTPUT_APK_WIN" \
+        "$ALIGNED_APK_WIN"
+fi
 
 rm -f "$ALIGNED_APK"
 

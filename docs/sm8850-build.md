@@ -17,15 +17,18 @@ SM8850（第五代骁龙 8 至尊版）只需要 HTP V81 相关的 5 个库（�
 ## 使用方式
 
 ```bash
-# 设置签名环境变量
+# release：设置签名环境变量
 export KEY_STORE='D:/my-projects/my-backup/backup-settings/my-android-release.keystore'
 export KEY_STORE_PASSWORD='<password>'
+export KEY_ALIAS='pisces312'   # 可省
 
-# 构建 SM8850 专属 release APK
-./build-sm8850.sh release basic
-
-# 输出: LocalDream_armv8a_2.7.0-basic-sm8850-signed.apk
+# 构建 SM8850 专属 APK
+./build-sm8850.sh release basic   # → *-sm8850-signed.apk（KEY_STORE + v2）
+./build-sm8850.sh debug basic     # → *-sm8850-debug.apk（debug.keystore + v3，无需 export）
 ```
+
+> debug 约定用 `~/.android/debug.keystore` + **APK v3** 签名。Honor 文件管理器可能
+> 报「未包含任何证书」（它只读 v1 META-INF），请用 `adb install -r`。
 
 ## 实现原理
 
