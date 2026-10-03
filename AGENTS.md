@@ -203,7 +203,7 @@ python tools/collect-build-info.py \
 `core.json`，UI 报 `MISMATCH: engine v5 vs core v3`，实际 Qwen 可正常出图——纯 stale
 manifest 误报。`assets/build-info/` 不进 git，rebuild commit 不会自动带上它。
 
-## submodule 的 dirty 状态是预期的，不要"清理"
+## submodule 的 dirty 状态是预期的，不要"清理"、不要提交
 
 `app/src/main/cpp/3rdparty/stable-diffusion.cpp` 及其内嵌 `ggml` submodule 会**长期显示
 dirty**（`git status` 报 ` m`），这不是遗留的未提交改动：
@@ -221,7 +221,11 @@ dirty**（`git status` 报 ` m`），这不是遗留的未提交改动：
    但中间状态易误判。
 2. **不要**把 patch 施加后的改动在 submodule 里 commit——与上游 patch 机制重复，只会造成
    指针漂移。
-3. 统计构建状态/是否 dirty 时必须用 `git status --porcelain --ignore-submodules=dirty`
+3. **提交到本仓库时不要 add 该 submodule 的 dirty 指针**（`git status` 里的
+   ` M app/src/main/cpp/3rdparty/stable-diffusion.cpp` / `-dirty`）。提交前用
+   `git add` 只加真正要进树的文件；`git commit` 也不要图省事 `git add -A`。
+   推送前 `git status --porcelain --ignore-submodules=dirty` 应无残留。
+4. 统计构建状态/是否 dirty 时必须用 `git status --porcelain --ignore-submodules=dirty`
    （`tools/collect-build-info.py` 和 `app/build.gradle.kts` 的 `GIT_DIRTY` 均已如此），
    否则 submodule 的永久 dirty 会污染信号。
 
