@@ -11,12 +11,14 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.io.InputStreamReader
 import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -75,15 +77,28 @@ object LogCapture {
                 arrayOf("logcat", "--pid=$pid", "-v", "threadtime"),
             )
             captureProcess = proc
-            val scope = CoroutineScope(Dispatchers.IO)
+            // A capture is diagnostics: nothing it does may take the host process down,
+            // so the scope swallows whatever escapes a child coroutine.
+            val scope = CoroutineScope(
+                Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+                    Log.w(TAG, "log capture coroutine failed", e)
+                },
+            )
             captureScope = scope
             captureJob = scope.launch {
-                BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                    var line: String? = null
-                    while (isActive && reader.readLine().also { line = it } != null) {
-                        val current = line ?: continue
-                        synchronized(lock) { appendLocked(current) }
+                try {
+                    BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                        var line: String? = null
+                        while (isActive && reader.readLine().also { line = it } != null) {
+                            val current = line ?: continue
+                            synchronized(lock) { appendLocked(current) }
+                        }
                     }
+                } catch (e: IOException) {
+                    // stopInternalLocked() destroys the capture process, which closes the
+                    // descriptor under this blocked read. That interrupt is how every
+                    // capture normally ends; anything else is a real failure.
+                    if (e !is InterruptedIOException) Log.w(TAG, "logcat read failed", e)
                 }
             }
             memJob = scope.launch {
