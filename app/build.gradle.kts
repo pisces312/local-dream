@@ -110,13 +110,8 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "_debug"
-            // Keep the env-var-only signing rule: reuse the release keystore for
-            // debug builds only when the operator actually provides one.
-            signingConfig = if (project.hasProperty("RELEASE_STORE_FILE")) {
-                signingConfigs.getByName("release")
-            } else {
-                null
-            }
+            // No signingConfig on purpose: AGP then applies its built-in debug
+            // keystore. Debug must never carry the release/upload key.
         }
     }
     compileOptions {

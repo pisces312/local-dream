@@ -63,22 +63,33 @@ WSL 里没有 `cygpath`，且 `zipalign` 是 Windows PE，**不要**在 WSL 执�
 `LocalDream_armv8a_<versionName>-basic-sm8850-debug.apk` 或 `…-sm8850-signed.apk`
 （文件名用 gradle 的 `versionName`，不含 `_debug` 后缀）。
 
-签名约定：
+签名约定 —— follow Android 官方惯例：**debug 恒用 debug 证书，release 恒用 operator 证书，两者永不对调**
+（Google Play 明确拒收 debug 签名包；反向「debug 复用 release key」也不是惯例）。
+**方案统一 v3-only**：minSdk 28 下 v1/v2 没有安全收益，不要为了兼容某个文件管理器去开它们。
 
-| 构建 | 证书 | 签名方案 |
-|---|---|---|
-| **debug** | `~/.android/debug.keystore`（`androiddebugkey` / `android`），无需 export | **v3** |
-| **release** | `KEY_STORE` 环境变量（见下文），必须 export | v2（脚本固定；可再开 v3） |
+| 构建 | 证书 | DN / SHA-256 | 方案 |
+|---|---|---|---|
+| **debug** | `~/.android/debug.keystore`（`androiddebugkey` / `android`），无需 export | `CN=Android Debug` / `a0a19938…` | v3-only |
+| **release** | `KEY_STORE` 环境变量（见下文），必须 export | `CN=pisces312` / `abadebd2…` | v3-only |
 
-debug **不**用 release 证书。从旧的 `CN=pisces312` debug 包升级时必须先
-`adb uninstall io.github.xororz.localdream.debug`。
+- `app/build.gradle.kts` 的 debug 变体**不设** `signingConfig`，让 AGP 挂内置 debug keystore。
+  debug 包 applicationId 带 `.debug` 后缀，与正式版是两个并存的应用，无需为覆盖安装共用证书。
+- 历史坑：2026-10-04 前 debug 在提供 `RELEASE_STORE_FILE` 时会复用 operator keystore，设备上
+  可能存有两种证书的 `.debug` 包；跨证书升级先 `adb uninstall io.github.xororz.localdream.debug`。
+- 查指纹：`apksigner verify --print-certs <apk>`。
 
-Honor 文件管理器只认 META-INF/v1，对 v3-only 可能报「未包含任何证书」——用
-`adb install -r` 即可。
+**apksigner 只写「覆盖目标 SDK 区间所需的最高方案」**，`--v2/--v3-signing-enabled true` 不保证真产出（实测）：
+
+| sign 参数 | 包内实际产出 |
+|---|---|
+| `--min-sdk-version 24`（脚本现值） | 仅 v3（同时开 v2 也被跳过；把 v3 关掉才会产出 v2） |
+| `--min-sdk-version 23 --v1-signing-enabled true` | v1 + v2 + v3 |
+
+`apksigner verify` 默认按 APK 自身 minSdk(28) 判定，v1/v2 一律显示 `false`；要看真实状态加
+`--min-sdk-version 23`。Honor 文件管理器只解析 META-INF/v1，对 v3-only 报「未包含任何证书」——
+用 `adb install -r`（已验证）。
 
 `-d <ip:port>` 可在打包后 `adb install` 到指定设备。
-
-debug 包 applicationId 带 `.debug` 后缀，与正式版并存。
 
 ### 何时要动 native（一般打包不必）
 
@@ -140,8 +151,8 @@ $env:ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS = 'pisces312'
 $env:ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD = '<password>'
 ```
 
-- `build.gradle.kts` 仅在 `RELEASE_STORE_FILE` 存在时挂 `signingConfig`；否则 release 产物不签名。
-- debug 变体同样只在提供了上述变量时复用 release keystore（保证覆盖安装签名一致）。
+- `build.gradle.kts` 仅在 `RELEASE_STORE_FILE` 存在时给 **release** 挂 `signingConfig`；否则 release 产物不签名。
+- debug 变体不挂任何 `signingConfig`（即使上述变量已设置），走 AGP 内置 debug keystore。
 - 密码与 keystore 本机路径见用户全局配置（不在本仓库），**不要复制进本仓库**。
 
 ### apksigner 重签（`build.bat` / `build-sm8850.sh` 精简流程）
