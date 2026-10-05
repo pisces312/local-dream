@@ -115,6 +115,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
@@ -124,6 +125,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -156,6 +158,7 @@ import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
+import io.github.xororz.localdream.ui.components.DebugLogDialog
 import io.github.xororz.localdream.ui.components.GenerationParamsDialog
 import io.github.xororz.localdream.ui.components.ImportParametersDialog
 import io.github.xororz.localdream.ui.components.OverlayIconButton
@@ -270,6 +273,7 @@ fun ModelRunScreen(
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var showOpenCLWarningDialog by remember { mutableStateOf(false) }
     var showInterruptDialog by remember { mutableStateOf(false) }
+    var showDebugLogDialog by remember { mutableStateOf(false) }
 
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var intermediateBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -1365,13 +1369,18 @@ fun ModelRunScreen(
 
     DisposableEffect(modelId) {
         val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        val captureEnabled = prefs.getBoolean("enable_log_capture", false)
+        // Debug builds always write the log file + memory sampler; the modal that
+        // pops on leaving the screen stays behind the explicit setting.
+        val publishEnabled = prefs.getBoolean("enable_log_capture", false)
+        val captureEnabled = BuildConfig.DEBUG || publishEnabled
         if (captureEnabled) {
-            LogCapture.start()
+            LogCapture.start(context)
         }
         onDispose {
-            if (captureEnabled) {
-                LogCapture.stopAndPublish()
+            when {
+                !captureEnabled -> Unit
+                publishEnabled -> LogCapture.stopAndPublish()
+                else -> LogCapture.stop()
             }
             // Safety net for paths that bypass handleExit() (e.g. predictive back
             // popping the destination while not running).
@@ -1700,6 +1709,10 @@ fun ModelRunScreen(
         } else {
             coroutineScope.launch { pagerState.animateScrollToPage(0) }
         }
+    }
+
+    if (showDebugLogDialog) {
+        DebugLogDialog(onDismiss = { showDebugLogDialog = false })
     }
 
     if (showInterruptDialog) {
@@ -2490,6 +2503,20 @@ fun ModelRunScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (BuildConfig.DEBUG) {
+                            Text(
+                                text = LogCapture.memStatus.value.ifBlank { "sampling…" },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.extraSmall)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .clickable { showDebugLogDialog = true }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
                         intermediateBitmap?.let { bitmap ->
                             Spacer(modifier = Modifier.height(8.dp))
                             Card(
