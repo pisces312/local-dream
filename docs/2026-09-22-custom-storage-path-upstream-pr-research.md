@@ -4,6 +4,17 @@
 > **决定：本 feature 仅 fork 自用，不向 `xororz/local-dream` 提 PR。维持现状，不做剥离/重构。**
 > 以后不要再重新评估「要不要合上游」；若上游权限政策明显变化，再另开文档推翻本决定。
 
+> **⚠️ 已被推翻（2026-10-08），按下文自己的约定另开文档，不改本文。**
+> 上游自己做了这个功能：PR #328（`395d7b6`，`data/ModelStorage.kt` + `ModelStorageSection.kt` +
+> `ModelMoveService`），并且**在 `app/src/basic/AndroidManifest.xml` 里声明了 `MANAGE_EXTERNAL_STORAGE`**
+> —— 本文 §2.1「上游拒绝 all-files 权限，所以永不合并」的前提不再成立。
+> 现在的方向反过来了：以上游 `ModelStorage` 为底座，把 fork 独有的「任意目录（Custom SAF）」叠上去，
+> fork 自己的整套 `customPath` 管线（56 个调用点）删除。详见
+> `docs/2026-10-08-model-storage-upstream-merge-plan.md`（含 §9 实施记录，已在
+> `feature/model-storage-upstream` 落地，未推送）。
+> 本文保留的价值是 §2 当时的评估理由与 §3 的沟通记录，以及「fork 独有档位」这个需求本身——
+> 它现在是 `Location.CUSTOM`，而不是被上游采纳。
+
 ---
 
 ## 1. 决定
