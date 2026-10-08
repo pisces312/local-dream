@@ -479,7 +479,6 @@
     <string name="clean_temp_confirm">Free up %s of temporary files (interrupted downloads and scratch buffers)?</string>
     <string name="clean_temp_none">No temporary files to clean</string>
     <string name="clean_temp_done">Freed %s</string>
-    <string name="permission_all_files_desc">Model export/import requires access to all files. Please grant the permission in settings.</string>
 
     <!-- File Manager -->
     <string name="no_files">No files found</string>
