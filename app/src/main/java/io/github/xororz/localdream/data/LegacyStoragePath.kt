@@ -71,12 +71,13 @@ object LegacyStoragePath {
         ModelStorage.setCustomRoot(app, legacy)
         ModelStorage.selectInPlace(app, ModelStorage.Location.CUSTOM)
         // Consumed for good: the folder lives in ModelStorage's own prefs from
-        // here on, and the relocation below is detected from the filesystem,
-        // so the retired key must not fire a second time.
+        // here on, and the flat -> models/ relocation is detected from the
+        // filesystem on the first scan (see relocateIfNeeded, called from
+        // ModelRepository.refreshAllModels), so the retired key must not fire a
+        // second time.
         runCatching { GenerationPreferences(app).saveModelsStoragePath(null) }
             .onFailure { Log.w(TAG, "could not clear the retired storage path", it) }
         Log.i(TAG, "adopted legacy custom directory: $legacy")
-        relocateIfNeeded(app)
         return true
     }
 

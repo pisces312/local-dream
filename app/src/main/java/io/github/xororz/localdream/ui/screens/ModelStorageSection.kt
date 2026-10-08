@@ -40,7 +40,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.xororz.localdream.R
-import io.github.xororz.localdream.data.LegacyStoragePath
 import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.data.ModelStorage.Location
 import io.github.xororz.localdream.data.ModelStorage.MoveState
@@ -357,23 +356,17 @@ internal fun ModelStorageMoveOverlay(onModelsChanged: () -> Unit) {
     val msgAccessLost = stringResource(R.string.model_storage_access_lost)
     val scope = rememberCoroutineScope()
     LifecycleResumeEffect(Unit) {
-        // Resuming is also the moment All files access may have come back, so
-        // this is where a custom folder adopted from the retired setting gets
-        // its contents renamed into the layout — off the main thread, and
-        // before the list is rescanned.
+        // All files access is granted or revoked in system settings, outside the
+        // app, so resuming is where a flip is noticed. The rescan it triggers
+        // (refreshAllModels) is itself what relocates an adopted custom folder
+        // before reading it, so there is nothing to move here.
         scope.launch {
-            val relocated = withContext(Dispatchers.IO) {
-                LegacyStoragePath.relocateIfNeeded(context)
-            }
             val hasAccess = ModelStorage.pollAccessChange(context)
-            when {
-                hasAccess != null -> {
-                    if (!hasAccess) {
-                        Toast.makeText(context, msgAccessLost, Toast.LENGTH_LONG).show()
-                    }
-                    currentOnModelsChanged()
+            if (hasAccess != null) {
+                if (!hasAccess) {
+                    Toast.makeText(context, msgAccessLost, Toast.LENGTH_LONG).show()
                 }
-                relocated -> currentOnModelsChanged()
+                currentOnModelsChanged()
             }
         }
         onPauseOrDispose { }
