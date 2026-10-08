@@ -542,6 +542,11 @@
     <string name="model_storage_custom_public">저장소 루트와 Download, DCIM 같은 공유 폴더에는 모델을 저장할 수 없습니다. 하위 폴더를 선택하거나 새로 만드세요.</string>
     <string name="model_storage_custom_read_only">해당 폴더에 쓸 수 없습니다. 다른 폴더를 선택하거나 새 폴더를 만드세요.</string>
     <string name="model_storage_custom_no_models">해당 폴더에는 다른 항목이 있고 모델은 없습니다. 빈 폴더나 이미 모델이 있는 폴더를 선택하세요.</string>
+    <string name="model_storage_adopted">선택한 폴더의 모델을 사용하도록 전환했습니다.</string>
+    <string name="model_storage_adopt_title">폴더에 이미 모델이 있습니다</string>
+    <string name="model_storage_adopt_or_merge">선택한 폴더에 이미 모델이 있고, 앱 저장소에도 모델이 있습니다. 이 폴더를 그대로 사용하거나(앱 저장소의 모델은 그대로 둡니다), 앱 저장소의 모델을 폴더로 이동할 수 있습니다.</string>
+    <string name="model_storage_adopt_use">이 폴더 사용</string>
+    <string name="model_storage_adopt_merge">앱 모델을 이동</string>
     <string name="model_storage_problem_title">모델을 읽을 수 없습니다</string>
     <string name="model_storage_unreachable">Local Dream이 %1$s(을)를 열 수 없어 그 폴더에 저장된 모델이 표시되지 않습니다. 폴더가 삭제되거나 이름이 바뀌었거나 앱의 권한이 꺼진 상태일 수 있습니다.</string>
     <string name="model_storage_download_blocked">모델은 앱 저장소 밖에 두는 설정인데 현재 해당 폴더를 열 수 없습니다. 지금 다운로드하면 앱 안에 복제본이 하나 더 생깁니다. 먼저 설정에서 접근을 복구하세요.</string>

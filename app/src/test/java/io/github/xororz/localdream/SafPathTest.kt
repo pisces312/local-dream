@@ -2,9 +2,12 @@ package io.github.xororz.localdream
 
 import io.github.xororz.localdream.utils.CustomRootProblem
 import io.github.xororz.localdream.utils.customRootProblem
+import io.github.xororz.localdream.utils.holdsModels
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -85,5 +88,21 @@ class SafPathTest {
         write(File(dir, ".nomedia"), "")
 
         assertNull(customRootProblem(dir, volumeRoot))
+    }
+
+    @Test
+    fun holdsModelsInEitherLayout() {
+        val flat = tmp.newFolder("flat_models")
+        write(File(flat, "my_anima/ANIMA"), "")
+        assertTrue(flat.holdsModels())
+
+        val laidOut = tmp.newFolder("laid_out_models")
+        write(File(laidOut, "models/sd_xl/finished"), "")
+        assertTrue(laidOut.holdsModels())
+
+        val foreign = tmp.newFolder("still_foreign")
+        write(File(foreign, "notes.txt"), "x")
+        assertFalse(foreign.holdsModels())
+        assertFalse(File(tmp.root, "missing").holdsModels())
     }
 }

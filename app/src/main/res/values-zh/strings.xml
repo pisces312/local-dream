@@ -548,6 +548,11 @@
     <string name="model_storage_custom_public">存储根目录和 Download、DCIM 等共享文件夹不能存放模型。请选择或新建一个子文件夹。</string>
     <string name="model_storage_custom_read_only">该文件夹不可写。请换一个，或新建文件夹。</string>
     <string name="model_storage_custom_no_models">该文件夹中有其他内容，且没有可识别的模型。请选择空文件夹，或已存放模型的文件夹。</string>
+    <string name="model_storage_adopted">已切换为使用所选文件夹中的模型。</string>
+    <string name="model_storage_adopt_title">文件夹中已有模型</string>
+    <string name="model_storage_adopt_or_merge">所选文件夹中已有模型，应用存储中也有自己的模型。可以直接使用该文件夹（应用存储中的模型保持原样），或把应用存储中的模型移入该文件夹。</string>
+    <string name="model_storage_adopt_use">直接使用该文件夹</string>
+    <string name="model_storage_adopt_merge">移入应用存储的模型</string>
     <string name="model_storage_problem_title">无法读取模型</string>
     <string name="model_storage_unreachable">Local Dream 无法打开 %1$s，存放在其中的模型不会显示。该文件夹可能已被删除或改名，也可能是应用失去了访问它的权限。</string>
     <string name="model_storage_download_blocked">模型本应存放在应用存储之外，而该目录当前无法打开。此时下载会在应用内另存一份副本，请先在设置中恢复访问。</string>

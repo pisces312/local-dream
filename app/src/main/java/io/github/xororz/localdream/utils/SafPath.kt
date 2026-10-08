@@ -83,6 +83,21 @@ internal fun File.containsModelMarker(): Boolean =
     File(this, Model.COMPLETE_MARKER).exists() ||
         Model.CUSTOM_MODEL_MARKERS.any { marker -> File(this, marker).exists() }
 
+/**
+ * Whether [dir] holds at least one model, in either the laid-out shape
+ * (`models/<id>`) or the fork's old flat one (`<id>` at the root).
+ */
+internal fun File.holdsModels(): Boolean {
+    if (!isDirectory) return false
+    val models = File(this, "models")
+    if (models.isDirectory &&
+        models.listFiles().orEmpty().any { it.isDirectory && it.containsModelMarker() }
+    ) {
+        return true
+    }
+    return listFiles().orEmpty().any { it.isDirectory && it.containsModelMarker() }
+}
+
 // The shared collections on the primary volume; deleting inside these is not
 // the app's business.
 private val PUBLIC_TOP_DIRS = setOf(

@@ -542,6 +542,11 @@
     <string name="model_storage_custom_public">ストレージのルートや Download、DCIM などの共有フォルダはモデルの保存先にできません。サブフォルダを選択または作成してください。</string>
     <string name="model_storage_custom_read_only">そのフォルダには書き込めません。別のフォルダを選ぶか、新しいフォルダを作成してください。</string>
     <string name="model_storage_custom_no_models">そのフォルダには別の内容があり、モデルは見つかりませんでした。空のフォルダか、すでにモデルが入っているフォルダを選択してください。</string>
+    <string name="model_storage_adopted">選択したフォルダ内のモデルを使用するよう切り替えました。</string>
+    <string name="model_storage_adopt_title">フォルダにすでにモデルがあります</string>
+    <string name="model_storage_adopt_or_merge">選択したフォルダにはすでにモデルがあり、アプリのストレージにもモデルがあります。このフォルダをそのまま使う（アプリ側のモデルはそのまま残ります）か、アプリ側のモデルをフォルダに移動するかを選べます。</string>
+    <string name="model_storage_adopt_use">このフォルダを使う</string>
+    <string name="model_storage_adopt_merge">アプリのモデルを移動</string>
     <string name="model_storage_problem_title">モデルを読み込めません</string>
     <string name="model_storage_unreachable">Local Dream は %1$s を開けないため、そこに保存したモデルが表示されません。フォルダが削除・名前変更されたか、アプリにその権限がなくなっています。</string>
     <string name="model_storage_download_blocked">モデルはアプリのストレージ外に保存する前提ですが、そのフォルダを今開けません。ここでダウンロードするとアプリ内に別のコピーができるだけなので、まず設定でアクセスを戻してください。</string>

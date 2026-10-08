@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.LegacyStoragePath
 import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.data.ModelStorage.Location
 import io.github.xororz.localdream.data.ModelStorage.MoveState
@@ -47,7 +48,9 @@ import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
 import io.github.xororz.localdream.utils.CustomRootProblem
 import io.github.xororz.localdream.utils.customRootProblem
+import io.github.xororz.localdream.utils.holdsModels
 import io.github.xororz.localdream.utils.resolveFsPathFromUri
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -77,6 +80,9 @@ internal fun ModelStorageSection() {
     // check restores it instead of clobbering a working setup.
     var customPathBackup by remember { mutableStateOf<String?>(null) }
     var hasCustomPathBackup by remember { mutableStateOf(false) }
+    // Both the picked folder and the current location hold models: ask
+    // whether to use the folder as it is or to merge the models into it.
+    var adoptOrMerge by remember { mutableStateOf(false) }
 
     val msgBusy = stringResource(R.string.model_storage_busy)
     val msgNoAccess = stringResource(R.string.model_storage_no_access)
@@ -84,6 +90,7 @@ internal fun ModelStorageSection() {
     val msgCustomPublic = stringResource(R.string.model_storage_custom_public)
     val msgCustomReadOnly = stringResource(R.string.model_storage_custom_read_only)
     val msgCustomNoModels = stringResource(R.string.model_storage_custom_no_models)
+    val msgAdopted = stringResource(R.string.model_storage_adopted)
 
     val customPath = remember(revision, moveState) { ModelStorage.customPath(context) }
 
@@ -98,6 +105,35 @@ internal fun ModelStorageSection() {
     fun startMove(target: Location) {
         if (!ModelStorage.startMove(context, target)) {
             Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun proceedWithMove(target: Location) {
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                // The move starts from wherever the models are right now.
+                ModelStorage.sizeAt(context, ModelStorage.location(context))
+            }
+            if (bytes == 0L) {
+                startMove(target)
+            } else {
+                confirmBytes = bytes
+                confirmTarget = target
+            }
+        }
+    }
+
+    // Uses the picked folder where it is: no model moves, the old flat layout
+    // is renamed down into models/, and the app-storage embeddings are seeded
+    // beside them (see LegacyStoragePath.relocateIfNeeded).
+    fun adoptCustomInPlace() {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                ModelStorage.selectInPlace(context, Location.CUSTOM)
+                LegacyStoragePath.relocateIfNeeded(context)
+            }
+            revision++
+            Toast.makeText(context, msgAdopted, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -128,17 +164,29 @@ internal fun ModelStorageSection() {
                 }
                 hasCustomPathBackup = false
                 customPathBackup = null
+
+                // A folder that already holds models can simply be used where
+                // it is. When app storage has no models of its own that is
+                // the obvious thing to do; when both sides hold models the
+                // person picks between this and merging theirs into it.
+                val dstHoldsModels = withContext(Dispatchers.IO) {
+                    ModelStorage.rootFor(context, Location.CUSTOM).holdsModels()
+                }
+                if (dstHoldsModels) {
+                    val srcHoldsModels = withContext(Dispatchers.IO) {
+                        File(ModelStorage.root(context), "models").holdsModels()
+                    }
+                    if (!srcHoldsModels && ModelStorage.location(context) == Location.INTERNAL) {
+                        adoptCustomInPlace()
+                        return@launch
+                    }
+                    if (srcHoldsModels) {
+                        adoptOrMerge = true
+                        return@launch
+                    }
+                }
             }
-            val bytes = withContext(Dispatchers.IO) {
-                // The move starts from wherever the models are right now.
-                ModelStorage.sizeAt(context, ModelStorage.location(context))
-            }
-            if (bytes == 0L) {
-                startMove(target)
-            } else {
-                confirmBytes = bytes
-                confirmTarget = target
-            }
+            proceedWithMove(target)
         }
     }
 
@@ -325,6 +373,26 @@ internal fun ModelStorageSection() {
                 TextButton(onClick = { confirmTarget = null }) {
                     Text(stringResource(R.string.cancel))
                 }
+            },
+        )
+    }
+
+    if (adoptOrMerge) {
+        AlertDialog(
+            onDismissRequest = { adoptOrMerge = false },
+            title = { Text(stringResource(R.string.model_storage_adopt_title)) },
+            text = { Text(stringResource(R.string.model_storage_adopt_or_merge)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    adoptOrMerge = false
+                    adoptCustomInPlace()
+                }) { Text(stringResource(R.string.model_storage_adopt_use)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    adoptOrMerge = false
+                    proceedWithMove(Location.CUSTOM)
+                }) { Text(stringResource(R.string.model_storage_adopt_merge)) }
             },
         )
     }
