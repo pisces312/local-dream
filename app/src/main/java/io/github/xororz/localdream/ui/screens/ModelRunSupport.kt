@@ -565,4 +565,5 @@ data class GenerationParameters(
     val useOpenCL: Boolean = false,
     val scheduler: String = "dpm",
     val mode: GenerationMode = GenerationMode.UNKNOWN,
+    val runtimeDir: String? = null,
 )

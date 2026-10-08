@@ -57,3 +57,23 @@ cp "$BUILD_DIR"/sdcpp/ggml/src/ggml-hexagon/libggml-htp-v79.so \
    "$BUILD_DIR"/sdcpp/ggml/src/ggml-hexagon/libggml-htp-v81.so \
    "$ASSET_DIR/"
 ls -la "$JNI_DIR" "$ASSET_DIR"
+
+# Record what produced these binaries. The engine is not tracked in git, so
+# this manifest is the only way the app can say which commit a given
+# libdit_engine.so came from; the build-id it stores is read back out of the
+# staged ELF, which lets the app notice a swapped .so at runtime too. A failure
+# here is not fatal -- the app then reports the engine as unrecorded.
+MAIN_DIR="$(cd ../.. && pwd)"
+REPO_ROOT="$(cd "$MAIN_DIR/../../.." && pwd)"
+CMAKE_VERSION="$(cmake --version | head -1 | awk '{print $3}')"
+python3 "$REPO_ROOT/tools/collect-build-info.py" \
+    --name dit-engine \
+    --out "$MAIN_DIR/assets/build-info/dit-engine.json" \
+    --repo "$REPO_ROOT" \
+    --abi-version "$ABI_VERSION" \
+    --toolchain-path "hexagonSdk=$HEXAGON_SDK_ROOT" \
+    --toolchain "cmake=${CMAKE_VERSION:-unknown}" \
+    --artifact "$JNI_DIR/libdit_engine.so" \
+    --artifact "$ASSET_DIR/libggml-htp-v79.so" \
+    --artifact "$ASSET_DIR/libggml-htp-v81.so" \
+    || echo "WARNING: could not write the build-info manifest"

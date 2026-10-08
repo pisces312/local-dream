@@ -106,6 +106,12 @@ fun GenerationParamsDialog(
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    if (!params.runOnCpu && params.runtimeDir != null) {
+                        Text(
+                            stringResource(R.string.runtime_lib) + ": ${params.runtimeDir}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                     Text(
                         "${stringResource(R.string.scheduler)}: ${schedulerDisplayName(params.scheduler)}",
                         style = MaterialTheme.typography.bodyMedium,

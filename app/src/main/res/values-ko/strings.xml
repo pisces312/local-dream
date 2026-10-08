@@ -75,6 +75,22 @@
     <string name="got_it">알겠습니다!</string>
     <string name="yes">예</string>
     <string name="about_app">참고</string>
+
+    <!-- Build provenance -->
+    <string name="settings_about">앱 정보</string>
+    <string name="build_info_title">빌드 정보</string>
+    <string name="build_info_copy">빌드 정보 복사</string>
+    <string name="build_info_copied">빌드 정보를 복사했습니다</string>
+    <string name="build_info_commit">커밋 %s</string>
+    <string name="build_info_commit_dirty">커밋 %s(미커밋 변경 있음)</string>
+    <string name="build_info_committed">커밋 시각 %s</string>
+    <string name="build_info_unrecorded">기록 없음</string>
+    <string name="build_info_missing">%s 없음</string>
+    <string name="build_info_build_id">build-id %s</string>
+    <string name="build_info_no_build_id">build-id 없음</string>
+    <string name="build_info_abi_ok">ABI 일치(v%d)</string>
+    <string name="build_info_abi_mismatch">ABI 불일치: 엔진 v%d, core는 v%d 필요</string>
+    <string name="build_info_abi_unknown">ABI 확인 불가(빌드 정보 없음)</string>
     <string name="must_read">이 앱은 CPU/GPU와 일부 Qualcomm NPU에서 Stable Diffusion 이미지 생성을 실행할 수 있습니다.\n\nSD1.5 모델은 Hexagon V68 아키텍처 이상의 Snapdragon NPU에서 지원됩니다.\n\nSDXL 모델은 Snapdragon 8 Gen 3 이상 기기에서 지원됩니다.\n\n사용 중인 칩이 위 범위에 해당하지 않으면 CPU/GPU에서만 실행할 수 있습니다.\n\n이 프로젝트는 https://github.com/xororz/local-dream 에서 오픈소스로 공개되어 있으며, 소스 코드를 확인하거나 이슈를 제출할 수 있습니다.\n\n문서: https://ld.chino.icu</string>
     <string name="help">도움말</string>
     <string name="more_options">더보기</string>
@@ -99,7 +115,7 @@
     <string name="download_model_hint">%s을(를) 다운로드하시겠습니까? 다운로드 중에는 앱을 종료하지 마세요.\n\n현재는 모든 Qualcomm 칩에서 NPU 모델을 다운로드할 수 있지만, 오래된 칩에서는 실행되지 않을 수 있습니다.</string>
     <string name="download_done">다운로드 완료</string>
     <string name="unsupport_npu">이 기기는 지원되지 않습니다. CPU 모델을 사용해 보세요.</string>
-    <string name="cpu_models">CPU 모델</string>
+    <string name="cpu_models">CPU/GPU 모델</string>
     <string name="npu_models">NPU 모델</string>
     <string name="no_cpu_models">모델 없음</string>
     <string name="no_npu_models">모델 없음</string>
