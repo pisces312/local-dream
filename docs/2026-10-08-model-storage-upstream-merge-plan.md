@@ -135,6 +135,7 @@
 | `d9ffa4d` | 重编 `libstable_diffusion_core.so` + 重写 `core.json` | §5 末尾的更正 |
 | `4f30c1a` | 接管自选目录时把内置 `embeddings/` 播种到 root 下（+ 6 例测试） | 审阅后补的缺口 ① |
 | `08b2807` | 目录不可达/权限被关 → 模型页对话框 + 闸住下载入口 | 审阅后补的缺口 ② |
+| `0911467` | 接管搬迁按 API 分档放行 + `dit.gguf` 只在新包就位后才删 | §10.3、§10.4 |
 
 ### 与计划的偏差（都是实测逼出来的，不是改主意）
 
@@ -200,17 +201,24 @@
 - `08b2807` 之后重新 `./build-sm8850.sh debug basic` 出包（116 MB），并用
   `aapt2 dump resources <apk>` 在**包内 resources.arsc** 里确认三个新 key 的 default/zh/ja/ko 四份文案都在
   （`model_storage_problem_title` `0x7f0f01d5`、`_unreachable` `0x7f0f01d9`、`_download_blocked` `0x7f0f01c8`），
-  不是只看源文件。包装机没做：`build-sm8850.sh -d emulator-5554` 会把设备串当主机名解析而失败，
-  之后 `adb devices` 已空；且 x86_64 模拟器本来就跑不了 sm8850 包。
+  不是只看源文件。第一次包装机失败：`build-sm8850.sh -d emulator-5554` 会把设备串当主机名解析而报错，
+  且当时 x86_64 模拟器在跑、真机没连；`0911467` 之后真机（SM8850）出现，改用不带 `-d` 的
+  `adb install -r` 装上成功。
 
 ### 还没做
 
 - 真机冒烟（§7 的判据），重点是五条：旧目录原地接管后模型列表完整、接管后已导入的倒置在设置页仍看得见
   且生成时生效（本轮的播种）、Internal↔Custom 迁移中途 `force-stop` 能续传、
   到系统设置里关掉「所有文件访问」后模型页弹出可授权的对话框且下载被闸住、
-  Qwen Image 2.1 在 1024² 能出图（验证 `all=disk` 真的把解码内存让出来了）。本机只挂着 x86_64 模拟器，跑不了 sm8850 包，
-  所以装包后的验证归用户。
-- 本轮两个补丁只做到「编译 + 单测 + 打包」，**包装机与真机验收都还没做**；`docs` 之外没有再动 native。
+  Qwen Image 2.1 在 1024² 能出图（验证 `all=disk` 真的把解码内存让出来了）。包已装到真机，
+  点击层的验收归用户（此前只挂着 x86_64 模拟器，跑不了 sm8850 包）。
+- 本轮三个补丁（`4f30c1a`/`08b2807`/`0911467`）：编译 + 18 例单测 + 重新打包 + `adb install -r` 到真机
+  （Honor `BKQ-AN80`，`ro.soc.model=SM8850`，API 37）均 Success，`versionName=3.0.0-alpha.5_debug`。
+  **界面点击层的验收还没做**，按分工归用户；`docs` 之外没有再动 native。
+- §10.3 的 Android 9/10 放行**在这台机器上无法实测**：真机是 Android 15/16，模拟器是 x86_64 跑不了 sm8850 包，
+  所以那条只有代码走查作为依据。有 Android 9/10 设备时可以这样验：旧包设过自定义目录 → 装新包 → 列表应完整、
+  设置里「自定义文件夹」应显示为已选中且能改回应用存储。
+- §10.4 的前置条件同理：已下新包的用户第一次刷列表应回收那 4 GB，未下新包时 `dit.gguf` 必须原样留着。
 - 分支**未推送**，`master` 未动。
 
 ## 10. 升级路径核对 + 模型目录的删除策略（2026-10-08 追加，逐处读代码得出）
@@ -226,9 +234,12 @@
 | root 有 A、内置有 B（名字不冲突） | 合并，只把 B 搬过去 | 单测 `addsAppEmbeddingsThatTheRootDoesNotHaveYet` |
 | 搬到一半被杀 | 内置还剩的文件不算冲突 ⇒ 下次调用续完 | 单测 `finishesAnInterruptedSeedOnTheNextCall` |
 
-⇒ 问的「升级时倒置只在内置、外部没有」= 表里第 2/3 行，能正确处理且有测试覆盖。**唯一漏网的是 Android 9/10**，见 10.3。
+⇒ 问的「升级时倒置只在内置、外部没有」= 表里第 2/3 行，能正确处理且有测试覆盖。曾经唯一漏网的是 Android 9/10，见 10.3（本轮已修）。
 
 ### 10.2 模型目录里的删除动作清单
+
+> 判据是用户 2026-10-08 定的规则：**模型目录里的文件，只在「界面点删除模型」或「切换存储目录」时才允许删**；
+> 改名（rename）不算删除但也只在原地接管那一次发生。下面按触发者逐处审。
 
 | 位置 | 删什么 | 触发者 | 与「非用户点击不删」一致？ |
 |---|---|---|---|
@@ -238,26 +249,30 @@
 | `LegacyStoragePath.relocateFlatRoot()`（`:138`） | **只删它自己刚建且仍是空的** `models/` | 接管时 | ✅（不碰任何用户文件） |
 | `ModelDownloadService`（`:144`/`:168-171`/`:242`/`:330`） | `temp_downloads`、重下同名 zip 前的旧目录、失败残留、`.part` | 用户点下载 | ✅ |
 | `TempCleaner.clean()`（`:50`/`:78`） | 内置 `models/` 下无标记的残骸 + `temp_downloads` | 界面「清理临时文件」确认框（`ModelListScreen.kt:532-540`） | ✅ 且**只扫 INTERNAL**，共享/自选目录一概不碰 |
-| `Model.initializeModels()` → `createQwenImage21Model()`（`Model.kt:760`） | **`models/qwen_image_2_1/dit.gguf`（4 GB，旧 Q4_0 DiT 权重）** | **每次刷新列表自动**，不看用户意图 | ❌ 见 10.4 |
+| `Model.initializeModels()` → `createQwenImage21Model()`（`Model.kt:756-764`） | ~~无条件~~ **仅当 `dit.safetensors` 已在**才删 `models/qwen_image_2_1/dit.gguf`（旧 Q4_0 DiT 权重 4 GB） | 每次刷新列表自动 | ✅ 本轮加前置条件后不再是「无谓的删除」：新包没就位时一份文件都不动 |
 
 其余 `delete()` 调用点（`TagAutocompleteRepository`/`HistoryManager`/`RuntimeManager`/`LogCapture`/
 `HistoryBackup`）都在模型目录之外，不在本条约束范围内。
 
-### 10.3 还没修的洞：Android 9/10 上接管不做搬迁
+### 10.3 已修：Android 9/10 上接管不做搬迁
 
-`relocateIfNeeded()` 用 `hasAllFilesAccess()` 当闸门（`LegacyStoragePath.kt:96`），而它内含
+`relocateIfNeeded()` 原来用 `hasAllFilesAccess()` 当闸门（`LegacyStoragePath.kt:96`），而它内含
 `isPublicStorageSupported()`（API 30+）⇒ **API ≤ 29 恒为 false，这条永远提前返回**。
 而 `adopt()` 不看 API 就设了 CUSTOM，于是 Android 9/10 上：目录仍是旧平面布局、`modelsDir()` 又 `mkdirs()`
-出一个空的 `root/models/` ⇒ 列表静静变空；新加的 `storageProblem` 也报不出来（`isAccessLost` 已按 API 分档为
-false，`isRootUnreachable` 看 root 本身确实可读可写）。minSdk 是 28，这是活路径。
-候选修法：把闸门换成 `ModelStorage.isAccessLost(context)`（它就是为「按 API 分档地判断权限」而生的）。
+出一个空的 `root/models/` ⇒ 列表静静变空；`storageProblem` 也报不出来（`isAccessLost` 按 API 分档为 false，
+`isRootUnreachable` 看 root 本身确实可读可写）；且 Settings 里 CUSTOM 行 `enabled = supported` 也是 false，
+只剩「应用存储」可点，等于把人困在原地。minSdk 是 28，这是活路径。
+**改法（本轮）**：闸门换成 `ModelStorage.isAccessLost(context)`——它就是「按 API 分档地判断权限」的那把尺，
+API ≤29 恒 false ⇒ rename 与播种照常执行；API 30+ 未授权时仍然提前返回，行为不变。
+`adopt()` 里 `hasAllFilesAccess() && !isUsableCustomRoot(dir)` 那句保持不动：它的语义是「能查才查」，本来就该用权限位。
 
-### 10.4 还没修：`dit.gguf` 的自动删除
+### 10.4 已修：`dit.gguf` 的自动删除
 
-`createQwenImage21Model()` 在**每次构建模型列表**时删 `models/qwen_image_2_1/dit.gguf`。
-新包（FP8）只要 `dit.safetensors`/`llm.gguf/llm_vision.gguf`，旧文件确实没人读；
-但若用户还没下新包，这一删就把他手里唯一那份 4 GB 权重抹掉了，且不会有任何提示。
-按 10.2 的规则这条不该留在自动路径里。三个候选：
-① 只在 `dit.safetensors` 已存在时才删（一行，保留回收 4 GB 的初衷）；
-② 挪进 `TempCleaner`，由「清理临时文件」按钮触发（用户主动，但当前只扫 INTERNAL，共享目录扫不到）；
-③ 干脆不删（代价：老安装的 4 GB 永久占位）。推荐 ①。
+`createQwenImage21Model()` 来自**上游** `3f76ac7`（`upstream/master` 也有，不是 fork 引入），
+在每次构建模型列表时删 `models/qwen_image_2_1/dit.gguf`。新包（FP8）要的是
+`dit.safetensors`/`llm.gguf`/`llm_vision.gguf`（`Model.kt:288-294`），旧文件确实没人读；
+但若用户还没下新包，这一删就把他手里唯一那份 4 GB 权重抹掉了，且没有任何提示——
+自选目录里那还可能是他自己放的文件。
+**改法（本轮）**：加前置条件 `File(modelDir, "dit.safetensors").isFile` 才删，保留上游回收 4 GB 的初衷，
+又不会出现「新的还没就位、旧的先被抹掉」。代价：还没下新包的用户那 4 GB 继续占位，下完新包后第一次刷新列表回收。
+将来同步上游时这条要**保留 fork 版本**，别默认取上游把它带回无条件删除。
