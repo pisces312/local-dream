@@ -118,7 +118,7 @@
     <string name="download_model_hint">Are you sure to download %s ? Please do not exit the application during the download process.\n\nWe currently allow NPU model downloads for all Qualcomm chips, but older chips may not be able to run them.</string>
     <string name="download_done">Download Finished</string>
     <string name="unsupport_npu">Your device is not supported. Try the CPU model please.</string>
-    <string name="cpu_models">CPU Models</string>
+    <string name="cpu_models">CPU/GPU Models</string>
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">No Models</string>
     <string name="no_npu_models">No Models</string>
@@ -262,6 +262,7 @@
     <string name="delete_file_confirm">Are you sure you want to delete the file \"%s\"?</string>
     <string name="file_deleted">File deleted successfully</string>
     <string name="no_model_files">No model files found</string>
+    <string name="file_manager_scope_hint">App-internal files, plus the model storage location currently in use (it may be outside the app when a shared location is selected).</string>
     <string name="loading_files">Loading files…</string>
     <string name="back_to_folders">Back to Folders</string>
     <string name="model_folder">Model: %s</string>
@@ -478,6 +479,20 @@
     <string name="clean_temp_confirm">Free up %s of temporary files (interrupted downloads and scratch buffers)?</string>
     <string name="clean_temp_none">No temporary files to clean</string>
     <string name="clean_temp_done">Freed %s</string>
+
+    <!-- File Manager -->
+    <string name="no_files">No files found</string>
+    <string name="export_success">Export completed</string>
+    <string name="export_failed">Export failed</string>
+    <string name="exporting">Exporting…</string>
+    <string name="export_file">Export</string>
+    <string name="delete_warning_title">Delete Warning</string>
+    <string name="delete_warning_text">Deleting "%s" may cause the app to malfunction. Are you sure?</string>
+    <string name="delete_anyway">Delete Anyway</string>
+    <string name="import_file">Import</string>
+    <string name="importing">Importing…</string>
+    <string name="import_success">Import completed</string>
+    <string name="import_failed">Import failed</string>
 
     <!-- Device link (remote control between two devices) -->
     <string name="remote_link">Device link</string>

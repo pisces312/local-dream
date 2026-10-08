@@ -1,5 +1,7 @@
 package io.github.xororz.localdream.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -80,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.documentfile.provider.DocumentFile
 import androidx.navigation.NavController
+import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.*
 import io.github.xororz.localdream.data.DarkModePreference
@@ -94,6 +97,7 @@ import io.github.xororz.localdream.ui.theme.ThemePreset
 import io.github.xororz.localdream.ui.theme.scheme
 import io.github.xororz.localdream.utils.LogCapture
 import io.github.xororz.localdream.utils.TempCleaner
+import io.github.xororz.localdream.utils.resolveFsPathFromUri
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -265,6 +269,9 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     val msgRenameSuccess = stringResource(R.string.rename_success)
     val msgRenameFailed = stringResource(R.string.rename_failed)
     val msgRemoteOffline = stringResource(R.string.remote_banner_offline)
+    // Read outside the click handler: stringResource is only callable from a
+    // composable body, and the toast fires from an onClick.
+    val msgStorageNoAccess = stringResource(R.string.model_storage_no_access)
 
     var downloadingModel by remember { mutableStateOf<Model?>(null) }
     var currentProgress by remember { mutableStateOf<DownloadProgress?>(null) }
@@ -308,7 +315,25 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     // are hidden because they would act on this device's storage.
     val remoteActive = remoteRepository.isActive
 
+    // Models are meant to live outside app storage and this device cannot reach
+    // them right now. Shown once per problem: dismissing it must not nag on
+    // every recomposition, but a *different* problem (access revoked, then the
+    // folder itself gone) is worth saying again.
+    val storageProblem = if (remoteActive) null else modelRepository.storageProblem
+    var dismissedProblem by remember { mutableStateOf<ModelStorage.StorageProblem?>(null) }
+    val activeStorageProblem = storageProblem?.takeIf { it != dismissedProblem }
+    LaunchedEffect(storageProblem) {
+        if (storageProblem == null) dismissedProblem = null
+    }
+    val accessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        // Granting happens outside the app; rescan rather than wait for a resume.
+        scope.launch { modelRepository.refreshAllModels() }
+    }
+
     var showHelpDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
 
     val isFirstLaunch = remember {
         context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -481,6 +506,10 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 }
             },
         )
+    }
+
+    if (showAboutDialog) {
+        AboutDialog(onDismiss = { showAboutDialog = false })
     }
 
     LaunchedEffect(showSettingsDialog) {
@@ -790,8 +819,72 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
         )
     }
 
+    activeStorageProblem?.let { problem ->
+        AlertDialog(
+            onDismissRequest = { dismissedProblem = problem },
+            title = { Text(stringResource(R.string.model_storage_problem_title)) },
+            text = {
+                Text(
+                    when (problem) {
+                        ModelStorage.StorageProblem.AccessLost ->
+                            stringResource(R.string.model_storage_access_lost)
+
+                        ModelStorage.StorageProblem.Unreachable -> stringResource(
+                            R.string.model_storage_unreachable,
+                            ModelStorage.root(context).absolutePath,
+                        )
+                    },
+                )
+            },
+            confirmButton = {
+                if (problem == ModelStorage.StorageProblem.AccessLost) {
+                    TextButton(
+                        onClick = {
+                            val launched = ModelStorage.allFilesAccessIntents(context).any { intent ->
+                                runCatching { accessLauncher.launch(intent) }.isSuccess
+                            }
+                            if (!launched) {
+                                Toast.makeText(
+                                    context,
+                                    msgStorageNoAccess,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            dismissedProblem = problem
+                        },
+                    ) { Text(stringResource(R.string.model_storage_grant)) }
+                } else {
+                    TextButton(onClick = { dismissedProblem = problem }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                }
+            },
+            dismissButton = {
+                if (problem == ModelStorage.StorageProblem.AccessLost) {
+                    TextButton(onClick = { dismissedProblem = problem }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                }
+            },
+        )
+    }
+
     showDownloadConfirm?.let { model ->
-        if (downloadingModel != null) {
+        if (storageProblem != null) {
+            // The list may look empty and the models may be fine: downloading
+            // now would put a second copy in app storage, so this is refused
+            // until the location is reachable again.
+            AlertDialog(
+                onDismissRequest = { showDownloadConfirm = null },
+                title = { Text(stringResource(R.string.cannot_download)) },
+                text = { Text(stringResource(R.string.model_storage_download_blocked)) },
+                confirmButton = {
+                    TextButton(onClick = { showDownloadConfirm = null }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                },
+            )
+        } else if (downloadingModel != null) {
             AlertDialog(
                 onDismissRequest = { showDownloadConfirm = null },
                 title = { Text(stringResource(R.string.cannot_download)) },
@@ -807,7 +900,12 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 onDismissRequest = { showDownloadConfirm = null },
                 title = { Text(stringResource(R.string.download_model)) },
                 text = {
-                    Text(stringResource(R.string.download_model_hint, model.name))
+                    Text(
+                        stringResource(
+                            R.string.download_model_hint,
+                            model.name,
+                        ),
+                    )
                 },
                 confirmButton = {
                     TextButton(
@@ -1853,6 +1951,16 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
+
+                    // Which commit this APK was built from
+                    item {
+                        SettingNavCard(
+                            icon = Icons.Default.Info,
+                            label = stringResource(R.string.settings_about),
+                            onClick = { showAboutDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
@@ -2282,60 +2390,151 @@ private fun formatFileSize(size: Long): String {
     }
 }
 
+private data class TopLevelItem(
+    val name: String,
+    val isDirectory: Boolean,
+    val fileCount: Int,
+    val sizeBytes: Long,
+    val fileType: FileType
+)
+
+private enum class FileType(val icon: ImageVector, val canDelete: Boolean, val canExport: Boolean, val warning: Boolean) {
+    MODELS(Icons.Default.Folder, true, true, false),
+    HISTORY(Icons.Default.History, true, true, false),
+    TEMP(Icons.Default.DeleteSweep, true, true, false),
+    RUNTIME(Icons.Default.Memory, false, false, true),
+    SAFETY(Icons.Default.Security, false, false, true),
+    OTHER(Icons.AutoMirrored.Filled.InsertDriveFile, true, true, false)
+}
+
+private fun classifyFile(file: File): FileType = when (file.name) {
+    "models" -> FileType.MODELS
+    "history" -> FileType.HISTORY
+    "temp_downloads", "ultrafix.txt", "tmp.txt", "mask.txt" -> FileType.TEMP
+    "runtime_libs", "qnnlibs" -> FileType.RUNTIME
+    "safety_checker.mnn" -> FileType.SAFETY
+    else -> FileType.OTHER
+}
+
+// Resolves the directory a file-manager folder name maps to. "models" follows
+// the active storage location (ModelStorage), so browsing and exporting
+// reflect where models actually live rather than a stale internal dir;
+// everything else stays in filesDir (history/caches are not migrated by design).
+private suspend fun resolveFileManagerDir(context: Context, folderName: String): File =
+    withContext(Dispatchers.IO) {
+        if (folderName == "models") {
+            return@withContext Model.getModelsDir(context)
+        }
+        File(context.filesDir, folderName)
+    }
+
+private suspend fun loadTopItems(context: Context): List<TopLevelItem> = withContext(Dispatchers.IO) {
+    val filesDir = context.filesDir
+    val result = mutableListOf<TopLevelItem>()
+
+    // Models may live outside app storage (Download/LocalDream, or a custom
+    // folder). Report the entry from wherever they actually are, and hide the
+    // possibly stale internal models dir so the manager never shows two
+    // "models" entries.
+    val modelsDir = Model.getModelsDir(context)
+    val modelsOutsideAppStorage = !modelsDir.absolutePath.startsWith(filesDir.absolutePath)
+
+    filesDir.listFiles()?.forEach { file ->
+        if (file.name == "models" && modelsOutsideAppStorage) return@forEach
+        val type = classifyFile(file)
+        if (file.isDirectory) {
+            val count = file.listFiles()?.size ?: 0
+            val size = file.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            result.add(TopLevelItem(file.name, true, count, size, type))
+        } else {
+            result.add(TopLevelItem(file.name, false, 1, file.length(), type))
+        }
+    }
+    if (modelsOutsideAppStorage) {
+        val count = modelsDir.listFiles()?.size ?: 0
+        val size = modelsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        result.add(TopLevelItem("models", true, count, size, FileType.MODELS))
+    }
+    result.sortedBy { it.fileType.ordinal }
+}
+
+private suspend fun loadFilesForFolder(context: Context, folderName: String): Triple<File?, Long, List<File>> = withContext(Dispatchers.IO) {
+    val folderDir = resolveFileManagerDir(context, folderName)
+    val all = folderDir.listFiles()?.toList() ?: emptyList()
+    val cache = all.firstOrNull { it.isDirectory && it.name == "cache" }
+    val cacheBytes = cache?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+    Triple(cache, cacheBytes, all)
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDeleted: () -> Unit) {
-    var modelFolders by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
+    var topItems by remember { mutableStateOf<List<TopLevelItem>>(emptyList()) }
     var selectedFolder by remember { mutableStateOf<String?>(null) }
+    var selectedSubFolder by remember { mutableStateOf<String?>(null) }
     var folderFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var showDeleteConfirm by remember { mutableStateOf<File?>(null) }
+    var showDeleteWarning by remember { mutableStateOf<File?>(null) }
     var showClearCacheConfirm by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
-    // Tracked separately so the "Clear Cache" button can light up without
-    // exposing the cache directory as a fake "file" entry in the list.
     var cacheDir by remember { mutableStateOf<File?>(null) }
     var cacheSize by remember { mutableLongStateOf(0L) }
+    var exportProgress by remember { mutableStateOf(false) }
+    var importProgress by remember { mutableStateOf(false) }
+    var filesToExport by remember { mutableStateOf<List<File>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     val msgCacheCleared = stringResource(R.string.cache_cleared)
+    val msgExportSuccess = stringResource(R.string.export_success)
+    val msgExportFailed = stringResource(R.string.export_failed)
 
-    suspend fun loadFolders() {
-        val folders = withContext(Dispatchers.IO) {
-            val modelsDir = Model.getModelsDir(context)
-            val result = mutableListOf<Pair<String, Int>>()
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        treeUri?.let { uri ->
+            val files = filesToExport
+            if (files.isEmpty()) return@let
+            scope.launch {
+                exportProgress = true
+                val success = exportFilesToUri(context, selectedFolder, files, uri)
+                exportProgress = false
+                Toast.makeText(
+                    context,
+                    if (success) msgExportSuccess else msgExportFailed,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
 
-            if (modelsDir.exists() && modelsDir.isDirectory) {
-                modelsDir.listFiles()?.forEach { modelDir ->
-                    if (modelDir.isDirectory) {
-                        val fileCount = modelDir.listFiles()?.size ?: 0
-                        if (fileCount > 0) {
-                            result.add(Pair(modelDir.name, fileCount))
-                        }
-                    }
+    val msgImportSuccess = stringResource(R.string.import_success)
+    val msgImportFailed = stringResource(R.string.import_failed)
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { fileUri ->
+            scope.launch {
+                importProgress = true
+                val success = importFileToApp(context, fileUri, selectedFolder)
+                importProgress = false
+                Toast.makeText(
+                    context,
+                    if (success) msgImportSuccess else msgImportFailed,
+                    Toast.LENGTH_SHORT
+                ).show()
+                if (success) {
+                    selectedFolder?.let { folderFiles = loadFilesForFolder(context, it).third }
+                    topItems = loadTopItems(context)
                 }
             }
-            result
         }
-        modelFolders = folders
-        isLoading = false
     }
 
-    suspend fun loadFilesForFolder(folderName: String) {
-        val (cd, size, files) = withContext(Dispatchers.IO) {
-            val folderDir = File(Model.getModelsDir(context), folderName)
-            val all = folderDir.listFiles()?.toList() ?: emptyList()
-            val cache = all.firstOrNull { it.isDirectory && it.name == "cache" }
-            val cacheBytes =
-                cache?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
-            Triple(cache, cacheBytes, all.filter { it.isFile })
-        }
-        cacheDir = cd
-        cacheSize = size
-        folderFiles = files
-    }
 
     LaunchedEffect(Unit) {
-        loadFolders()
+        topItems = loadTopItems(context)
+        isLoading = false
     }
 
     if (showDeleteConfirm != null) {
@@ -2349,11 +2548,29 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                         val fileToDelete = showDeleteConfirm!!
                         showDeleteConfirm = null
                         scope.launch {
-                            val deleted = withContext(Dispatchers.IO) { fileToDelete.delete() }
+                            val deleted = withContext(Dispatchers.IO) {
+                                if (fileToDelete.isDirectory) fileToDelete.deleteRecursively()
+                                else fileToDelete.delete()
+                            }
                             if (deleted) {
                                 onFileDeleted()
-                                selectedFolder?.let { loadFilesForFolder(it) }
-                                loadFolders()
+                                if (selectedSubFolder != null) {
+                                    selectedFolder?.let { folder ->
+                                        val parent = File(
+                                            resolveFileManagerDir(context, folder),
+                                            selectedSubFolder!!,
+                                        )
+                                        folderFiles = withContext(Dispatchers.IO) {
+                                            parent.listFiles()?.toList() ?: emptyList()
+                                        }
+                                    }
+                                } else {
+                                    selectedFolder?.let {
+                                        val (_, _, files) = loadFilesForFolder(context, it)
+                                        folderFiles = files
+                                    }
+                                }
+                                topItems = loadTopItems(context)
                             }
                         }
                     },
@@ -2366,6 +2583,31 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    if (showDeleteWarning != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteWarning = null },
+            title = { Text(stringResource(R.string.delete_warning_title)) },
+            text = { Text(stringResource(R.string.delete_warning_text, showDeleteWarning!!.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteWarning = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) {
+                    Text(stringResource(R.string.delete_anyway))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteWarning = null }) {
                     Text(stringResource(R.string.cancel))
                 }
             },
@@ -2390,7 +2632,7 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                                 Toast.LENGTH_SHORT,
                             ).show()
                             onFileDeleted()
-                            selectedFolder?.let { loadFilesForFolder(it) }
+                            selectedFolder?.let { loadFilesForFolder(context, it) }
                         }
                     },
                     colors = ButtonDefaults.textButtonColors(
@@ -2414,10 +2656,23 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 if (selectedFolder != null) {
                     IconButton(
-                        onClick = { selectedFolder = null },
+                        onClick = {
+                            if (selectedSubFolder != null) {
+                                selectedSubFolder = null
+                                scope.launch {
+                                    val (cd, size, files) = loadFilesForFolder(context, selectedFolder!!)
+                                    cacheDir = cd
+                                    cacheSize = size
+                                    folderFiles = files
+                                }
+                            } else {
+                                selectedFolder = null
+                            }
+                        },
                         modifier = Modifier.size(24.dp),
                     ) {
                         Icon(
@@ -2428,10 +2683,69 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                     }
                 }
                 Text(
-                    text = selectedFolder?.let {
-                        stringResource(R.string.model_folder, it)
-                    } ?: stringResource(R.string.file_manager),
+                    text = when {
+                        selectedSubFolder != null -> stringResource(R.string.model_folder, "$selectedFolder/$selectedSubFolder")
+                        selectedFolder != null -> stringResource(R.string.model_folder, selectedFolder!!)
+                        else -> stringResource(R.string.file_manager)
+                    },
+                    modifier = Modifier.weight(1f),
                 )
+                if (selectedFolder == null) {
+                    IconButton(
+                        onClick = { importLauncher.launch("*/*") },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = stringResource(R.string.import_file),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                if (selectedFolder == "runtime_libs") {
+                    val runtimeImportLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocumentTree()
+                    ) { uri ->
+                        if (uri != null) {
+                            val docFile = DocumentFile.fromTreeUri(context, uri)
+                            val dirName = docFile?.name ?: return@rememberLauncherForActivityResult
+                            scope.launch {
+                                val success = withContext(Dispatchers.IO) {
+                                    val sourceDir = resolveFsPathFromUri(context, uri)?.let { File(it) }
+                                    if (sourceDir != null && sourceDir.isDirectory) {
+                                        RuntimeManager.importRuntimeDir(context, sourceDir)
+                                    } else {
+                                        false
+                                    }
+                                }
+                                val message = if (success) {
+                                    context.getString(R.string.runtime_import_success, dirName)
+                                } else {
+                                    context.getString(R.string.runtime_import_exists, dirName)
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                if (success) {
+                                    folderFiles = loadFilesForFolder(context, "runtime_libs").third
+                                }
+                            }
+                        }
+                    }
+                    TextButton(
+                        onClick = { runtimeImportLauncher.launch(null) },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = stringResource(R.string.runtime_import_folder),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
         },
         text = {
@@ -2440,20 +2754,26 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                     .fillMaxWidth()
                     .height(400.dp),
             ) {
-                if (isLoading) {
+                if (isLoading || exportProgress || importProgress) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
                         ContainedLoadingIndicator()
                         Text(
-                            stringResource(R.string.loading_files),
+                            stringResource(
+                                when {
+                                    exportProgress -> R.string.exporting
+                                    importProgress -> R.string.importing
+                                    else -> R.string.loading_files
+                                }
+                            ),
                             modifier = Modifier.padding(top = 48.dp),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                 } else if (selectedFolder == null) {
-                    if (modelFolders.isEmpty()) {
+                    if (topItems.isEmpty()) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center,
@@ -2469,7 +2789,7 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    stringResource(R.string.no_model_files),
+                                    stringResource(R.string.no_files),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -2480,14 +2800,34 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            items(modelFolders) { (folderName, fileCount) ->
+                            item {
+                                Text(
+                                    stringResource(R.string.file_manager_scope_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            items(topItems) { item ->
                                 Card(
                                     onClick = {
-                                        selectedFolder = folderName
-                                        folderFiles = emptyList()
-                                        cacheDir = null
-                                        cacheSize = 0L
-                                        scope.launch { loadFilesForFolder(folderName) }
+                                        if (item.isDirectory) {
+                                            selectedFolder = item.name
+                                            selectedSubFolder = null
+                                            folderFiles = emptyList()
+                                            cacheDir = null
+                                            cacheSize = 0L
+                                            scope.launch {
+                                                if (item.name == "runtime_libs") {
+                                                    withContext(Dispatchers.IO) {
+                                                        RuntimeManager.ensureDefaultRuntime(context)
+                                                    }
+                                                }
+                                                val (cd, size, files) = loadFilesForFolder(context, item.name)
+                                                cacheDir = cd
+                                                cacheSize = size
+                                                folderFiles = files
+                                            }
+                                        }
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(
@@ -2504,33 +2844,92 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            modifier = Modifier.weight(1f),
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.Folder,
+                                                imageVector = item.fileType.icon,
                                                 contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
+                                                tint = if (item.fileType.warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                                             )
                                             Column {
                                                 Text(
-                                                    text = folderName,
+                                                    text = item.name,
                                                     style = MaterialTheme.typography.titleSmall,
                                                 )
                                                 Text(
-                                                    text = pluralStringResource(
-                                                        R.plurals.file_count,
-                                                        fileCount,
-                                                        fileCount,
-                                                    ),
+                                                    text = if (item.isDirectory) {
+                                                        pluralStringResource(
+                                                            R.plurals.file_count,
+                                                            item.fileCount,
+                                                            item.fileCount,
+                                                        ) + "  ${formatFileSize(item.sizeBytes)}"
+                                                    } else {
+                                                        formatFileSize(item.sizeBytes)
+                                                    },
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 )
                                             }
                                         }
-                                        Icon(
-                                            imageVector = Icons.Default.ChevronRight,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
+                                        if (item.isDirectory) {
+                                            Row {
+                                                if (item.fileType.canExport) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            filesToExport = emptyList()
+                                                            scope.launch {
+                                                                val folderDir =
+                                                                    resolveFileManagerDir(context, item.name)
+                                                                filesToExport = withContext(Dispatchers.IO) {
+                                                                    folderDir.walkTopDown().filter { it.isFile }.toList()
+                                                                }
+                                                                exportLauncher.launch(null)
+                                                            }
+                                                        },
+                                                        colors = IconButtonDefaults.iconButtonColors(
+                                                            contentColor = MaterialTheme.colorScheme.primary,
+                                                        ),
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Upload,
+                                                            contentDescription = stringResource(R.string.export_file),
+                                                        )
+                                                    }
+                                                }
+                                                Icon(
+                                                    imageVector = Icons.Default.ChevronRight,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        } else if (item.fileType.canDelete) {
+                                            IconButton(
+                                                onClick = {
+                                                    // Resolve via the same path the
+                                                    // list was built from — a
+                                                    // custom-path "models" entry
+                                                    // must not resolve to the
+                                                    // internal dir.
+                                                    scope.launch {
+                                                        val target =
+                                                            resolveFileManagerDir(context, item.name)
+                                                        if (item.fileType.warning) {
+                                                            showDeleteWarning = target
+                                                        } else {
+                                                            showDeleteConfirm = target
+                                                        }
+                                                    }
+                                                },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.error,
+                                                ),
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = stringResource(R.string.delete_file),
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2555,6 +2954,18 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                         ) {
                             items(folderFiles) { file ->
                                 Card(
+                                    onClick = {
+                                        if (file.isDirectory) {
+                                            selectedSubFolder = file.name
+                                            folderFiles = emptyList()
+                                            scope.launch {
+                                                val files = withContext(Dispatchers.IO) {
+                                                    file.listFiles()?.toList() ?: emptyList()
+                                                }
+                                                folderFiles = files
+                                            }
+                                        }
+                                    },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2573,7 +2984,7 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                                             modifier = Modifier.weight(1f),
                                         ) {
                                             Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                                                imageVector = if (file.isDirectory) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.secondary,
                                             )
@@ -2583,23 +2994,48 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                                                     style = MaterialTheme.typography.titleSmall,
                                                 )
                                                 Text(
-                                                    text = formatFileSize(file.length()),
+                                                    text = if (file.isDirectory) {
+                                                        val count = file.listFiles()?.size ?: 0
+                                                        pluralStringResource(
+                                                            R.plurals.file_count,
+                                                            count,
+                                                            count,
+                                                        )
+                                                    } else {
+                                                        formatFileSize(file.length())
+                                                    },
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 )
                                             }
                                         }
 
-                                        IconButton(
-                                            onClick = { showDeleteConfirm = file },
-                                            colors = IconButtonDefaults.iconButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.error,
-                                            ),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Delete,
-                                                contentDescription = stringResource(R.string.delete_file),
-                                            )
+                                        Row {
+                                            IconButton(
+                                                onClick = {
+                                                    filesToExport = listOf(file)
+                                                    exportLauncher.launch(null)
+                                                },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.primary,
+                                                ),
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Upload,
+                                                    contentDescription = stringResource(R.string.export_file),
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { showDeleteConfirm = file },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.error,
+                                                ),
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = stringResource(R.string.delete_file),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -2638,6 +3074,107 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
             }
         },
     )
+}
+
+private suspend fun exportFilesToUri(
+    context: Context,
+    folderName: String?,
+    files: List<File>,
+    treeUri: Uri
+): Boolean = withContext(Dispatchers.IO) {
+    try {
+        val treeDoc = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext false
+        val destDir = folderName?.let { name ->
+            treeDoc.findFile(name) ?: treeDoc.createDirectory(name)
+        } ?: treeDoc
+        files.forEach { file ->
+            if (file.isDirectory) {
+                val subDir = destDir.findFile(file.name) ?: destDir.createDirectory(file.name)
+                subDir?.let { copyDirectoryToUri(context, file, it) }
+            } else {
+                copyFileToUri(context, file, destDir)
+            }
+        }
+        true
+    } catch (e: Exception) {
+        Log.e("FileManager", "Export failed: ${e.message}")
+        false
+    }
+}
+
+private fun copyFileToUri(context: Context, file: File, destDir: DocumentFile) {
+    val destFile = destDir.findFile(file.name) ?: destDir.createFile("application/octet-stream", file.name)
+    destFile?.uri?.let { uri ->
+        context.contentResolver.openOutputStream(uri)?.use { output ->
+            file.inputStream().use { input ->
+                input.copyTo(output)
+            }
+        }
+    }
+}
+
+private fun copyDirectoryToUri(context: Context, srcDir: File, destDir: DocumentFile) {
+    srcDir.listFiles()?.forEach { file ->
+        if (file.isDirectory) {
+            val subDir = destDir.findFile(file.name) ?: destDir.createDirectory(file.name)
+            subDir?.let { copyDirectoryToUri(context, file, it) }
+        } else {
+            copyFileToUri(context, file, destDir)
+        }
+    }
+}
+
+private suspend fun importFileToApp(
+    context: Context,
+    fileUri: Uri,
+    targetFolder: String?
+): Boolean = withContext(Dispatchers.IO) {
+    try {
+        val fileName = getFileNameFromUri(context, fileUri) ?: "imported_file"
+        // "models" must land in the configured storage dir, matching where the
+        // file manager browses it; other folders stay in filesDir.
+        val targetDir = targetFolder?.let { resolveFileManagerDir(context, it) } ?: context.filesDir
+        if (!targetDir.exists()) targetDir.mkdirs()
+
+        if (fileName.endsWith(".zip", ignoreCase = true)) {
+            // Extract ZIP to a new sub-directory named after the ZIP (without extension)
+            val extractDirName = fileName.substringBeforeLast(".")
+            val extractDir = File(targetDir, extractDirName)
+            if (extractDir.exists()) extractDir.deleteRecursively()
+            extractDir.mkdirs()
+
+            context.contentResolver.openInputStream(fileUri)?.use { input ->
+                ZipInputStream(input.buffered()).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val entryName = entry.name.substringAfterLast('/')
+                            if (entryName.isNotEmpty() &&
+                                !entryName.startsWith(".") &&
+                                !entryName.startsWith("__MACOSX")
+                            ) {
+                                val outFile = File(extractDir, entryName)
+                                outFile.outputStream().use { out -> zip.copyTo(out) }
+                            }
+                        }
+                        entry = zip.nextEntry
+                    }
+                }
+            }
+        } else {
+            // Copy single file
+            val destFile = File(targetDir, fileName)
+            context.contentResolver.openInputStream(fileUri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+        true
+    } catch (e: Exception) {
+        Log.e("FileManager", "Import failed: ${e.message}")
+        false
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3192,6 +3729,9 @@ suspend fun extractNpuModel(
     } catch (e: Exception) {
         Log.e("NpuModelExtract", "Extraction failed", e)
 
+        // Same dir the try block extracted into: the half-extracted files are
+        // under the configured storage path, so cleaning filesDir/models would
+        // delete nothing and leave gigabytes behind in external storage.
         val modelId = modelName.replace(" ", "")
         val modelDir = File(Model.getModelsDir(context), modelId)
         if (modelDir.exists()) {
@@ -3674,6 +4214,7 @@ suspend fun convertCustomModel(
     } catch (e: Exception) {
         Log.e("ModelConvert", "Conversion failed", e)
 
+        // Same dir the try block wrote into — see extractNpuModel().
         val modelId = modelName.replace(" ", "")
         val modelDir = File(Model.getModelsDir(context), modelId)
         if (modelDir.exists()) {
@@ -3710,6 +4251,76 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String? = try {
 } catch (e: Exception) {
     Log.e("GetFileName", "Get file name from uri failed", e)
     null
+}
+
+/**
+ * Version and the commit this APK was built from, injected by gradle at build
+ * time. Two local builds of the same version are otherwise indistinguishable
+ * once installed.
+ */
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val commitLabel = if (BuildConfig.GIT_DIRTY) {
+        stringResource(R.string.build_info_commit_dirty, BuildConfig.GIT_COMMIT)
+    } else {
+        stringResource(R.string.build_info_commit, BuildConfig.GIT_COMMIT)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_about)) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(text = commitLabel, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = stringResource(
+                        R.string.build_info_committed,
+                        BuildConfig.GIT_COMMIT_TIME,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = BuildConfig.GIT_COMMIT_SUBJECT,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as? ClipboardManager
+                    clipboard?.setPrimaryClip(
+                        ClipData.newPlainText(
+                            context.getString(R.string.settings_about),
+                            "LocalDream ${BuildConfig.VERSION_NAME} " +
+                                "(${BuildConfig.VERSION_CODE})\n" +
+                                "$commitLabel\n" +
+                                "${BuildConfig.GIT_COMMIT_TIME}\n" +
+                                BuildConfig.GIT_COMMIT_SUBJECT,
+                        ),
+                    )
+                    Toast.makeText(context, R.string.build_info_copied, Toast.LENGTH_SHORT).show()
+                },
+            ) {
+                Text(stringResource(R.string.build_info_copy))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
