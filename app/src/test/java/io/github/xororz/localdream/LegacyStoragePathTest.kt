@@ -86,6 +86,51 @@ class LegacyStoragePathTest {
     }
 
     @Test
+    fun relocatesIntoAModelsFolderThatWasOnlyCreated() {
+        val root = tmp.newFolder("half_adopted")
+        // Asking for the path mkdirs models/, so a root adopted without access
+        // ends up with an empty models/ beside a folder that is still flat.
+        // That must not read as "already laid out" forever.
+        File(root, "models").mkdirs()
+        write(File(root, "my_anima/ANIMA"), "")
+        write(File(root, "my_anima/dit.gguf"), "weights")
+
+        assertTrue(LegacyStoragePath.relocateFlatRoot(root) > 0)
+
+        assertTrue(File(root, "models/my_anima/dit.gguf").isFile)
+        assertFalse(File(root, "my_anima").exists())
+        assertEquals(0, root.listFiles().orEmpty().count { it.isDirectory && it.name != "models" })
+
+        // models/ now has entries, so the next call has nothing to do.
+        assertEquals(0, LegacyStoragePath.relocateFlatRoot(root))
+    }
+
+    @Test
+    fun doesNotReachIntoAModelsFolderThatAlreadyHoldsSomething() {
+        val root = tmp.newFolder("mixed_layout")
+        write(File(root, "models/a/finished"), "")
+        write(File(root, "loose_dir/x.bin"), "")
+
+        assertEquals(0, LegacyStoragePath.relocateFlatRoot(root))
+
+        assertTrue(File(root, "loose_dir/x.bin").isFile)
+        assertFalse(File(root, "models/models").exists())
+    }
+
+    @Test
+    fun keepsAnEmptyModelsFolderItDidNotCreate() {
+        val root = tmp.newFolder("no_model_folders")
+        File(root, "models").mkdirs()
+        write(File(root, "notes.txt"), "keep me")
+
+        assertEquals(0, LegacyStoragePath.relocateFlatRoot(root))
+
+        // Deleting models/ here would be removing a folder this call never made.
+        assertTrue(File(root, "models").isDirectory)
+        assertTrue(File(root, "notes.txt").isFile)
+    }
+
+    @Test
     fun movesAppEmbeddingsIntoTheAdoptedRoot() {
         val appStorage = tmp.newFolder("filesDir")
         val root = tmp.newFolder("sdcard_models")

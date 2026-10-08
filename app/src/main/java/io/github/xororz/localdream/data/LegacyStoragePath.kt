@@ -89,6 +89,10 @@ object LegacyStoragePath {
      */
     fun relocateIfNeeded(context: Context): Boolean {
         if (ModelStorage.location(context) != ModelStorage.Location.CUSTOM) return false
+        // CUSTOM with no folder recorded makes rootFor answer with app storage,
+        // and this would then reorganize the app's own files. Nothing to adopt
+        // until a folder is actually picked.
+        if (ModelStorage.customPath(context) == null) return false
         // A move in flight owns both sides; it would race this and lose.
         if (ModelStorage.moveState.value is ModelStorage.MoveState.Moving) return false
         // Not the All files access check: below Android 11 shared folders are
@@ -126,18 +130,28 @@ object LegacyStoragePath {
      * it directly.
      */
     internal fun relocateFlatRoot(root: File): Int {
-        if (!root.isDirectory || File(root, MODELS_DIR).isDirectory) return 0
+        if (!root.isDirectory) return 0
+        val models = File(root, MODELS_DIR)
+        // An empty models/ is not the layout already being in place. rootFor /
+        // modelsDir() mkdirs that folder whenever anything asks for it, so a root
+        // adopted before it was readable would keep its models flat behind an
+        // empty models/ forever, with the list permanently empty. Entries inside
+        // it are the real signal that a relocation already happened.
+        if (models.isDirectory && models.listFiles().orEmpty().isNotEmpty()) return 0
         val entries = root.listFiles()?.filter { it.name !in ROOT_OWN_NAMES } ?: return 0
         // Only a folder that actually holds subfolders counts as the old
         // layout; an empty or unrelated one keeps its files where they are.
         if (entries.none { it.isDirectory }) return 0
-        val models = File(root, MODELS_DIR)
-        if (!models.mkdir()) return 0
+        val created = !models.exists()
+        if (!models.isDirectory && !models.mkdirs()) return 0
         var moved = 0
         for (entry in entries) {
             if (entry.renameTo(File(models, entry.name))) moved++
         }
-        if (moved == 0) models.delete()
+        // Drop only a models/ this call made and left empty. One that was
+        // already here — ours or not — keeps whatever is in it, since nothing
+        // here may delete files the user put there.
+        if (moved == 0 && created) models.delete()
         return moved
     }
 

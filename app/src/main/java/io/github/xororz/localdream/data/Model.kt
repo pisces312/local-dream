@@ -1135,6 +1135,12 @@ class ModelRepository private constructor(private val context: Context) {
         refreshMutex.withLock {
             // Where the models live is decided before this scans anything else.
             (context.applicationContext as? LocalDreamApplication)?.awaitStorageAdoption()
+            // Adoption itself only fires once, for the retired preference. A root
+            // that became readable later — All files access granted from the
+            // dialog on this very page — still holds its models flat, so every
+            // rescan closes it. Idempotent: it renames nothing once models/ has
+            // entries, and it can copy embeddings, so it belongs on IO.
+            withContext(Dispatchers.IO) { LegacyStoragePath.relocateIfNeeded(context) }
             // Asked before the first getModelsDir() below: that one creates the
             // folder it is asked for, so a deleted root would look reachable by
             // the time this were checked afterwards.
