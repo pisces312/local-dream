@@ -45,6 +45,9 @@ import io.github.xororz.localdream.data.ModelStorage.Location
 import io.github.xororz.localdream.data.ModelStorage.MoveState
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
+import io.github.xororz.localdream.utils.isUsableCustomRoot
+import io.github.xororz.localdream.utils.resolveFsPathFromUri
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,11 +76,17 @@ internal fun ModelStorageSection() {
 
     val msgBusy = stringResource(R.string.model_storage_busy)
     val msgNoAccess = stringResource(R.string.model_storage_no_access)
+    val msgCustomUnusable = stringResource(R.string.model_storage_custom_unusable)
+
+    val customPath = remember(revision, moveState) { ModelStorage.customPath(context) }
 
     // After an unfinished move either location is a valid target: the
     // one it was headed for finishes it, the other one moves the files back.
     fun canMoveTo(target: Location): Boolean = target != ModelStorage.location(context) ||
-        ModelStorage.pendingMove(context) != null
+        ModelStorage.pendingMove(context) != null ||
+        // While CUSTOM is in effect, picking a *different* folder is a move too.
+        (target == Location.CUSTOM &&
+            ModelStorage.rootFor(context, target).absolutePath != ModelStorage.root(context).absolutePath)
 
     fun startMove(target: Location) {
         if (!ModelStorage.startMove(context, target)) {
@@ -88,7 +97,8 @@ internal fun ModelStorageSection() {
     fun askToMove(target: Location) {
         scope.launch {
             val bytes = withContext(Dispatchers.IO) {
-                ModelStorage.sizeAt(context, ModelStorage.other(target))
+                // The move starts from wherever the models are right now.
+                ModelStorage.sizeAt(context, ModelStorage.location(context))
             }
             if (bytes == 0L) {
                 startMove(target)
@@ -129,12 +139,39 @@ internal fun ModelStorageSection() {
             Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
             return
         }
-        // Either direction touches Download/LocalDream.
+        // Any shared location, in either direction, needs All files access.
         if (!ModelStorage.hasAllFilesAccess()) {
             requestAccess(target)
         } else {
             askToMove(target)
         }
+    }
+
+    // CUSTOM is never chosen by the radio button alone: a folder has to be
+    // picked first, and only once it resolves to a usable path does anything
+    // move. Re-picking while CUSTOM is in effect moves the models to the new
+    // folder (or is a no-op when it is the same one).
+    val pickCustomLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        revision++
+        if (uri == null) return@rememberLauncherForActivityResult
+        val dir = resolveFsPathFromUri(context, uri)?.let(::File)
+        if (dir == null || !isUsableCustomRoot(dir)) {
+            Toast.makeText(context, msgCustomUnusable, Toast.LENGTH_LONG).show()
+            return@rememberLauncherForActivityResult
+        }
+        if (moveState is MoveState.Moving || ModelStorage.isBusy()) {
+            Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        ModelStorage.setCustomRoot(context, dir.absolutePath)
+        choose(Location.CUSTOM)
+    }
+
+    fun pickCustomFolder() {
+        if (moveState is MoveState.Moving) return
+        pickCustomLauncher.launch(null)
     }
 
     Column {
@@ -179,6 +216,21 @@ internal fun ModelStorageSection() {
                 selected = current == Location.DOWNLOADS,
                 enabled = supported,
                 onClick = { choose(Location.DOWNLOADS) },
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            StorageOption(
+                title = locationLabel(Location.CUSTOM),
+                description = when {
+                    !supported -> stringResource(R.string.model_storage_public_unsupported)
+                    customPath != null -> stringResource(
+                        R.string.model_storage_custom_current,
+                        customPath,
+                    )
+                    else -> stringResource(R.string.model_storage_custom_hint)
+                },
+                selected = current == Location.CUSTOM,
+                enabled = supported,
+                onClick = { pickCustomFolder() },
             )
             if (pending != null && moveState !is MoveState.Moving) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -243,6 +295,7 @@ internal fun ModelStorageSection() {
 private fun locationLabel(location: Location): String = when (location) {
     Location.INTERNAL -> stringResource(R.string.model_storage_internal)
     Location.DOWNLOADS -> stringResource(R.string.model_storage_public, ModelStorage.PUBLIC_FOLDER)
+    Location.CUSTOM -> stringResource(R.string.model_storage_custom)
 }
 
 @Composable

@@ -39,6 +39,11 @@ import kotlinx.coroutines.launch
  *   models without downloading them again. Needs All files access
  *   (Android 11+), asked for only when someone picks it. Shared storage
  *   ignores letter case, unlike app storage ([ignoresCase]).
+ * - [Location.CUSTOM] (fork addition): a folder the person picks themselves
+ *   (SAF tree, resolved to a real path because the native backend reads and
+ *   dlopen()s from it). Same layout as either root above, needs the same All
+ *   files access, and the picked folder must be a real filesystem path on a
+ *   mounted volume.
  *
  * The layout under either root is the same, and other apps may read it:
  * - `models/<model id>/` - one folder per model, with its marker files
@@ -60,6 +65,11 @@ object ModelStorage {
     private const val KEY_LOCATION = "location"
     private const val KEY_MOVING_TO = "moving_to"
 
+    // The folder behind Location.CUSTOM. Kept here rather than in the app's
+    // DataStore so it travels with the location it belongs to, and is excluded
+    // from backups by the same rule.
+    private const val KEY_CUSTOM_PATH = "custom_path"
+
     // In noBackupFilesDir, see MoveJournal.
     private const val JOURNAL = "model_move_journal"
 
@@ -78,7 +88,7 @@ object ModelStorage {
     // Free space kept on top of each file being copied.
     private const val SPACE_MARGIN = 256L shl 20
 
-    enum class Location { INTERNAL, DOWNLOADS }
+    enum class Location { INTERNAL, DOWNLOADS, CUSTOM }
 
     sealed class MoveState {
         object Idle : MoveState()
@@ -121,11 +131,22 @@ object ModelStorage {
         cached = value
     }
 
-    fun other(location: Location): Location = when (location) {
-        Location.INTERNAL -> Location.DOWNLOADS
-        Location.DOWNLOADS -> Location.INTERNAL
+    /**
+     * Records [path] as the root of [Location.CUSTOM] without switching to it.
+     * A move sets the location once the files are there; picking a folder that
+     * already holds the models (the legacy custom path) uses [selectInPlace].
+     */
+    fun setCustomRoot(context: Context, path: String) {
+        prefs(context).edit(commit = true) { putString(KEY_CUSTOM_PATH, path) }
     }
 
+    /** Switches to [location] without moving anything: the files are already there. */
+    fun selectInPlace(context: Context, location: Location) {
+        setLocation(context, location)
+    }
+
+    // With three locations there is no single "other" side any more, so a move
+    // is described by where it starts rather than by a fixed pair.
     fun rootFor(context: Context, location: Location): File = when (location) {
         Location.INTERNAL -> context.filesDir
 
@@ -133,7 +154,15 @@ object ModelStorage {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             PUBLIC_FOLDER,
         )
+
+        // No folder picked yet (a cleared or half-written preference): read
+        // from app storage rather than inventing a path, the way the location
+        // fallback has always worked.
+        Location.CUSTOM -> customPath(context)?.let(::File) ?: context.filesDir
     }
+
+    /** The folder behind [Location.CUSTOM], or null while none has been picked. */
+    fun customPath(context: Context): String? = prefs(context).getString(KEY_CUSTOM_PATH, null)
 
     fun root(context: Context): File = rootFor(context, location(context))
 
@@ -152,7 +181,7 @@ object ModelStorage {
      * current location. Shared storage ignores case, so a model id checked
      * case-sensitively there can still land on another model's folder.
      */
-    fun ignoresCase(context: Context): Boolean = location(context) == Location.DOWNLOADS
+    fun ignoresCase(context: Context): Boolean = location(context) != Location.INTERNAL
 
     /**
      * Whether this build can offer [Location.DOWNLOADS] at all: only the
@@ -166,9 +195,9 @@ object ModelStorage {
     }.getOrDefault(false).also { publicAvailable = it }
 
     // A build without the permission still shows the choice if models are
-    // already in Download/, so they can be moved back.
+    // already outside app storage, so they can be moved back.
     fun isChoiceShown(context: Context): Boolean = isPublicStorageAvailable(context) ||
-        location(context) == Location.DOWNLOADS
+        location(context) != Location.INTERNAL
 
     fun isPublicStorageSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
@@ -176,17 +205,18 @@ object ModelStorage {
         // Throws when no primary volume is mounted; no volume is no access.
         runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)
 
-    /** Download/LocalDream is selected but All files access has been turned off since. */
-    fun isAccessLost(context: Context): Boolean = location(context) == Location.DOWNLOADS && !hasAllFilesAccess()
+    /** A shared location is selected but All files access has been turned off since. */
+    fun isAccessLost(context: Context): Boolean = location(context) != Location.INTERNAL &&
+        !hasAllFilesAccess()
 
     /**
-     * All files access when it changed since the last call while models live in
-     * Download/LocalDream, else null. It is switched in system settings, outside
+     * All files access when it changed since the last call while models live
+     * outside app storage, else null. It is switched in system settings, outside
      * the app, so the model list has to be rescanned when it flips. The first
      * call reports only missing access.
      */
     fun pollAccessChange(context: Context): Boolean? {
-        if (location(context) != Location.DOWNLOADS) {
+        if (location(context) == Location.INTERNAL) {
             seenAccess = null
             return null
         }
@@ -250,6 +280,9 @@ object ModelStorage {
      * back.
      */
     fun startMove(context: Context, to: Location): Boolean {
+        // Without a folder there is nowhere to move to; rootFor() would quietly
+        // fall back to app storage and call it CUSTOM.
+        if (to == Location.CUSTOM && customPath(context) == null) return false
         val app = context.applicationContext
         synchronized(gate) {
             if (moving || isBusy()) return false
@@ -285,6 +318,12 @@ object ModelStorage {
     fun resumePendingMove(context: Context) {
         if (moveStarted) return
         val to = pendingMove(context) ?: return
+        if (to == Location.CUSTOM && customPath(context) == null) {
+            // The folder was never recorded; drop the marker so nothing waits
+            // on a move that cannot happen.
+            prefs(context).edit(commit = true) { remove(KEY_MOVING_TO) }
+            return
+        }
         startMove(context, to)
     }
 
@@ -293,12 +332,20 @@ object ModelStorage {
     }
 
     private fun move(context: Context, to: Location) {
-        // Either direction reads or writes Download/LocalDream.
+        // Every shared location, in either direction, needs All files access.
         if (!hasAllFilesAccess()) throw IOException(context.getString(R.string.model_storage_no_access))
 
-        val from = other(to)
+        // setLocation() only runs when the move finishes, so the location in
+        // effect is still the source — also after a restart mid-move.
+        val from = location(context)
         val src = rootFor(context, from)
         val dst = rootFor(context, to)
+        if (src.absolutePath == dst.absolutePath) {
+            // The folder picked for CUSTOM is where the models already are.
+            setLocation(context, to)
+            prefs(context).edit(commit = true) { remove(KEY_MOVING_TO) }
+            return
+        }
         val journal = MoveJournal(File(context.noBackupFilesDir, JOURNAL))
         val resuming = pendingMove(context) != null
         checkNames(context, src, dst, to, resuming)
@@ -306,7 +353,7 @@ object ModelStorage {
         prefs(context).edit(commit = true) { putString(KEY_MOVING_TO, to.name) }
 
         dst.mkdirs()
-        if (to == Location.DOWNLOADS) {
+        if (to != Location.INTERNAL) {
             // Nothing here is a picture; keep the gallery from scanning gigabytes.
             File(dst, ".nomedia").takeIf { !it.exists() }?.createNewFile()
         }
@@ -339,8 +386,8 @@ object ModelStorage {
             if (!dir.exists()) continue
             val names = dir.list() ?: throw IOException("cannot read ${dir.path}")
             val there = File(dst, sub).list().orEmpty()
-            if (to == Location.DOWNLOADS) {
-                // Download/ ignores letter case: these would land in one folder.
+            if (to != Location.INTERNAL) {
+                // Shared storage ignores letter case: these would land in one folder.
                 names.groupBy { it.lowercase(Locale.ROOT) }.values
                     .filter { it.size > 1 }
                     .forEach { clashes += it.joinToString(" / ") }
@@ -368,6 +415,7 @@ object ModelStorage {
             val label = when (to) {
                 Location.INTERNAL -> context.getString(R.string.model_storage_internal)
                 Location.DOWNLOADS -> context.getString(R.string.model_storage_public, PUBLIC_FOLDER)
+                Location.CUSTOM -> customPath(context) ?: context.getString(R.string.model_storage_custom)
             }
             throw IOException(context.getString(R.string.model_storage_conflict, label, taken.joinToString()))
         }

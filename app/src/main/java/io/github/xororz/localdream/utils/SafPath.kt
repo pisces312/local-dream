@@ -3,6 +3,7 @@ package io.github.xororz.localdream.utils
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import io.github.xororz.localdream.data.Model
 import java.io.File
 
 /**
@@ -34,3 +35,42 @@ internal fun resolveFsPathFromUri(context: Context, uri: Uri): String? {
     // Fallback: try to resolve via canonical path
     return null
 }
+
+/**
+ * Whether [dir] can hold the model storage root: models, embeddings and the
+ * download scratch get created and deleted inside it, so it must be a writable
+ * folder the app owns — never the volume root or one of Android's shared
+ * collections, whose contents belong to the user and to other apps.
+ *
+ * Accepts a fresh (or empty) folder, one that already has the app layout
+ * (`models/` beside `embeddings/`), and a folder holding only model directories
+ * in the pre-layout shape the fork used to write — that last case is what lets
+ * an existing custom directory keep working without moving anything.
+ */
+internal fun isUsableCustomRoot(dir: File): Boolean {
+    val root = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+    val normalized = dir.absolutePath.trimEnd('/')
+    if (normalized == root) return false
+    if (normalized.removePrefix("$root/") in PUBLIC_TOP_DIRS) return false
+    if (!dir.isDirectory && !dir.mkdirs()) return false
+    if (!dir.canWrite()) return false
+
+    val entries = dir.listFiles().orEmpty()
+    if (File(dir, "models").isDirectory) return true
+    return entries.all { it.isDirectory && (it.isModelDir() || it.name in APP_MANAGED_NAMES) }
+}
+
+/** A folder the app manages: it carries at least one model marker file. */
+private fun File.isModelDir(): Boolean =
+    File(this, Model.COMPLETE_MARKER).exists() ||
+        Model.CUSTOM_MODEL_MARKERS.any { marker -> File(this, marker).exists() }
+
+// The shared collections on the primary volume; deleting inside these is not
+// the app's business.
+private val PUBLIC_TOP_DIRS = setOf(
+    "Download", "Downloads", "DCIM", "Pictures", "Movies", "Music",
+    "Alarms", "Notifications", "Ringtones", "Podcasts",
+)
+
+// Files the app itself leaves at the root.
+private val APP_MANAGED_NAMES = setOf("embeddings", "temp_downloads", ".nomedia")
