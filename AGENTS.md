@@ -214,10 +214,10 @@ python tools/collect-build-info.py \
 `core.json`，UI 报 `MISMATCH: engine v5 vs core v3`，实际 Qwen 可正常出图——纯 stale
 manifest 误报。`assets/build-info/` 不进 git，rebuild commit 不会自动带上它。
 
-## submodule 的 dirty 状态是预期的，不要"清理"、不要提交
+## submodule 的 dirty 是预期的，不要"清理"、不要提交
 
-`app/src/main/cpp/3rdparty/stable-diffusion.cpp` 及其内嵌 `ggml` submodule 会**长期显示
-dirty**（`git status` 报 ` m`），这不是遗留的未提交改动：
+`app/src/main/cpp/3rdparty/stable-diffusion.cpp` 及其内嵌 `ggml` submodule 的工作区**长期带
+着未提交改动**，这不是遗留的待提交内容：
 
 - 来源是上游以 patch 文件形式入库的 Hexagon 算子修复（`dit/stable-diffusion.cpp.patch`
   和 `dit/ggml.patch`），由 `dit/CMakeLists.txt` 的 `apply_local_patch()` 在 configure
@@ -226,19 +226,26 @@ dirty**（`git status` 报 ` m`），这不是遗留的未提交改动：
 - 正确状态 = submodule 停在上游 commit + patch 留在工作区。构建（gradle 打包）编译的
   就是打过 patch 的代码。
 
+噪音屏蔽：`.gitmodules` 给该 submodule 设了 `ignore = dirty`，`git status`/`git diff` 默认
+不再报这条噪音（实测 2026-10-08：`.gitmodules` 里的 `ignore` 会被 `git status` 直接采纳，
+不需要再写进 `.git/config`；命令行带 `--ignore-submodules=none` 可临时覆盖它看全貌）。
+**取值必须是 `dirty`，不要改成 `all`**——`all` 会把指针漂移一起藏掉，而指针漂移正是下面第 2
+条要防的。`dirty` 只吞内容改动：submodule HEAD ≠ 记录的 gitlink 时 `git status` 仍报 ` M`，
+`git diff --submodule=log` 会打出 `Submodule sub <sha>..<sha> (rewind)` 这样的行。
+
 因此：
 
 1. **不要** `git submodule update --force` 去"清理" dirty——会抹掉 patch，虽会幂等重施，
    但中间状态易误判。
 2. **不要**把 patch 施加后的改动在 submodule 里 commit——与上游 patch 机制重复，只会造成
    指针漂移。
-3. **提交到本仓库时不要 add 该 submodule 的 dirty 指针**（`git status` 里的
-   ` M app/src/main/cpp/3rdparty/stable-diffusion.cpp` / `-dirty`）。提交前用
-   `git add` 只加真正要进树的文件；`git commit` 也不要图省事 `git add -A`。
+3. **提交到本仓库时不要 add 该 submodule 的指针**。默认 `git status` 已看不到内容改动；要核对
+   指针有没有漂移，用 `git status --ignore-submodules=none` 配合 `git diff --submodule=log`。
+   提交前用 `git add` 只加真正要进树的文件，`git commit` 不要图省事 `git add -A`。
    推送前 `git status --porcelain --ignore-submodules=dirty` 应无残留。
-4. 统计构建状态/是否 dirty 时必须用 `git status --porcelain --ignore-submodules=dirty`
+4. 统计构建状态/是否 dirty 时继续显式带 `--ignore-submodules=dirty`
    （`tools/collect-build-info.py` 和 `app/build.gradle.kts` 的 `GIT_DIRTY` 均已如此），
-   否则 submodule 的永久 dirty 会污染信号。
+   不依赖 `.gitmodules` 与本机 `.git/config` 的取值差异。
 
 ## 模型支持
 
