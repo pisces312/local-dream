@@ -561,6 +561,15 @@ class ModelRepository private constructor(private val context: Context) {
     var isLoaded by mutableStateOf(false)
         private set
 
+    // Why the list is empty although the models live outside app storage: the
+    // permission was revoked, or the folder itself cannot be read or written
+    // (deleted, card unmounted, read-only). Nothing is wrong with the models in
+    // either case, but without a word here the list silently empties and the
+    // natural reaction — re-downloading — writes a second copy of every
+    // gigabyte into app storage.
+    var storageProblem by mutableStateOf<ModelStorage.StorageProblem?>(null)
+        private set
+
     suspend fun ensureLoaded() {
         if (isLoaded) return
         refreshAllModels()
@@ -1122,6 +1131,10 @@ class ModelRepository private constructor(private val context: Context) {
         refreshMutex.withLock {
             // Where the models live is decided before this scans anything else.
             (context.applicationContext as? LocalDreamApplication)?.awaitStorageAdoption()
+            // Asked before the first getModelsDir() below: that one creates the
+            // folder it is asked for, so a deleted root would look reachable by
+            // the time this were checked afterwards.
+            storageProblem = ModelStorage.storageProblem(context)
             baseUrl = generationPreferences.getBaseUrl()
             models = withContext(Dispatchers.IO) {
                 // Stamp dirs written before COMPLETE_MARKER existed, or the

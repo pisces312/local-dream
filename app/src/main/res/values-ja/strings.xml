@@ -539,4 +539,7 @@
     <string name="model_storage_custom_hint">デバイス上の任意のフォルダを選択できます。アプリはその中に models/ と embeddings/ を作成し、モデルを移動します。「すべてのファイルへのアクセス」が必要です。</string>
     <string name="model_storage_custom_current">選択中: %1$s</string>
     <string name="model_storage_custom_unusable">そのフォルダはモデルの保存先にできません。空のフォルダか、アプリが作成したフォルダを選択してください。</string>
+    <string name="model_storage_problem_title">モデルを読み込めません</string>
+    <string name="model_storage_unreachable">Local Dream は %1$s を開けないため、そこに保存したモデルが表示されません。フォルダが削除・名前変更されたか、アプリにその権限がなくなっています。</string>
+    <string name="model_storage_download_blocked">モデルはアプリのストレージ外に保存する前提ですが、そのフォルダを今開けません。ここでダウンロードするとアプリ内に別のコピーができるだけなので、まず設定でアクセスを戻してください。</string>
 </resources>

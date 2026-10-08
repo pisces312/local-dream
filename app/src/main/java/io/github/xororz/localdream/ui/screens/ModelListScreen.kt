@@ -269,6 +269,9 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     val msgRenameSuccess = stringResource(R.string.rename_success)
     val msgRenameFailed = stringResource(R.string.rename_failed)
     val msgRemoteOffline = stringResource(R.string.remote_banner_offline)
+    // Read outside the click handler: stringResource is only callable from a
+    // composable body, and the toast fires from an onClick.
+    val msgStorageNoAccess = stringResource(R.string.model_storage_no_access)
 
     var downloadingModel by remember { mutableStateOf<Model?>(null) }
     var currentProgress by remember { mutableStateOf<DownloadProgress?>(null) }
@@ -311,6 +314,23 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     // models; all local management actions (download/import/delete/rename)
     // are hidden because they would act on this device's storage.
     val remoteActive = remoteRepository.isActive
+
+    // Models are meant to live outside app storage and this device cannot reach
+    // them right now. Shown once per problem: dismissing it must not nag on
+    // every recomposition, but a *different* problem (access revoked, then the
+    // folder itself gone) is worth saying again.
+    val storageProblem = if (remoteActive) null else modelRepository.storageProblem
+    var dismissedProblem by remember { mutableStateOf<ModelStorage.StorageProblem?>(null) }
+    val activeStorageProblem = storageProblem?.takeIf { it != dismissedProblem }
+    LaunchedEffect(storageProblem) {
+        if (storageProblem == null) dismissedProblem = null
+    }
+    val accessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        // Granting happens outside the app; rescan rather than wait for a resume.
+        scope.launch { modelRepository.refreshAllModels() }
+    }
 
     var showHelpDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
@@ -799,8 +819,72 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
         )
     }
 
+    activeStorageProblem?.let { problem ->
+        AlertDialog(
+            onDismissRequest = { dismissedProblem = problem },
+            title = { Text(stringResource(R.string.model_storage_problem_title)) },
+            text = {
+                Text(
+                    when (problem) {
+                        ModelStorage.StorageProblem.AccessLost ->
+                            stringResource(R.string.model_storage_access_lost)
+
+                        ModelStorage.StorageProblem.Unreachable -> stringResource(
+                            R.string.model_storage_unreachable,
+                            ModelStorage.root(context).absolutePath,
+                        )
+                    },
+                )
+            },
+            confirmButton = {
+                if (problem == ModelStorage.StorageProblem.AccessLost) {
+                    TextButton(
+                        onClick = {
+                            val launched = ModelStorage.allFilesAccessIntents(context).any { intent ->
+                                runCatching { accessLauncher.launch(intent) }.isSuccess
+                            }
+                            if (!launched) {
+                                Toast.makeText(
+                                    context,
+                                    msgStorageNoAccess,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            dismissedProblem = problem
+                        },
+                    ) { Text(stringResource(R.string.model_storage_grant)) }
+                } else {
+                    TextButton(onClick = { dismissedProblem = problem }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                }
+            },
+            dismissButton = {
+                if (problem == ModelStorage.StorageProblem.AccessLost) {
+                    TextButton(onClick = { dismissedProblem = problem }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                }
+            },
+        )
+    }
+
     showDownloadConfirm?.let { model ->
-        if (downloadingModel != null) {
+        if (storageProblem != null) {
+            // The list may look empty and the models may be fine: downloading
+            // now would put a second copy in app storage, so this is refused
+            // until the location is reachable again.
+            AlertDialog(
+                onDismissRequest = { showDownloadConfirm = null },
+                title = { Text(stringResource(R.string.cannot_download)) },
+                text = { Text(stringResource(R.string.model_storage_download_blocked)) },
+                confirmButton = {
+                    TextButton(onClick = { showDownloadConfirm = null }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                },
+            )
+        } else if (downloadingModel != null) {
             AlertDialog(
                 onDismissRequest = { showDownloadConfirm = null },
                 title = { Text(stringResource(R.string.cannot_download)) },

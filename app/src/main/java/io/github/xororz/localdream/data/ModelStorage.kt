@@ -205,9 +205,49 @@ object ModelStorage {
         // Throws when no primary volume is mounted; no volume is no access.
         runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)
 
-    /** A shared location is selected but All files access has been turned off since. */
+    /**
+     * A shared location is selected but All files access has been turned off
+     * since. Below Android 11 shared storage needs no such permission, so a
+     * missing one there is not a problem to report — that would nag every user
+     * on an older device whose folder is reading fine.
+     */
     fun isAccessLost(context: Context): Boolean = location(context) != Location.INTERNAL &&
-        !hasAllFilesAccess()
+        isPublicStorageSupported() && !hasAllFilesAccess()
+
+    /**
+     * Whether the folder the models are supposed to live in cannot be read or
+     * written right now: deleted, unmounted (a card pulled from a custom path on
+     * one), or read-only. The permission case is [isAccessLost]; this is the one
+     * left after the permission is fine, and it is why the model list can come
+     * up empty without anything being wrong with the models.
+     *
+     * Deliberately does not create anything. [modelsDir] would mkdirs() a deleted
+     * folder back into existence, and the list would then look legitimately empty
+     * instead of warning about the gigabytes it no longer sees.
+     */
+    fun isRootUnreachable(context: Context): Boolean {
+        val current = location(context)
+        if (current == Location.INTERNAL) return false
+        // No folder recorded behind CUSTOM: rootFor() serves app storage, which
+        // is reachable, and Settings shows the choice as unselected.
+        if (current == Location.CUSTOM && customPath(context) == null) return false
+        val root = rootFor(context, current)
+        return !(root.isDirectory && root.canRead() && root.canWrite())
+    }
+
+    /** Why models outside app storage may not be readable right now. */
+    enum class StorageProblem { AccessLost, Unreachable }
+
+    /**
+     * The one problem the current location has, or null while it is healthy.
+     * Ordered: without the permission every shared folder also looks missing,
+     * and granting it is the only action that helps.
+     */
+    fun storageProblem(context: Context): StorageProblem? = when {
+        isAccessLost(context) -> StorageProblem.AccessLost
+        isRootUnreachable(context) -> StorageProblem.Unreachable
+        else -> null
+    }
 
     /**
      * All files access when it changed since the last call while models live
@@ -216,7 +256,7 @@ object ModelStorage {
      * call reports only missing access.
      */
     fun pollAccessChange(context: Context): Boolean? {
-        if (location(context) == Location.INTERNAL) {
+        if (location(context) == Location.INTERNAL || !isPublicStorageSupported()) {
             seenAccess = null
             return null
         }

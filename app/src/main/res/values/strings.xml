@@ -569,4 +569,7 @@
     <string name="model_storage_custom_hint">Pick any folder on this device. The app creates models/ and embeddings/ inside it and moves the models there. Needs All files access.</string>
     <string name="model_storage_custom_current">Selected folder: %1$s</string>
     <string name="model_storage_custom_unusable">That folder cannot hold the models. Pick an empty one, or a folder the app created there.</string>
+    <string name="model_storage_problem_title">Models cannot be read</string>
+    <string name="model_storage_unreachable">Local Dream cannot open %1$s, so the models stored there are not listed. The folder may have been deleted or renamed, or the app no longer has permission to open it.</string>
+    <string name="model_storage_download_blocked">Models are meant to live outside app storage, and that folder cannot be opened right now. Downloading now would save a second copy inside the app. Restore access in Settings first.</string>
 </resources>
