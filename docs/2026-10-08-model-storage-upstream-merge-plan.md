@@ -133,6 +133,8 @@
 | `79c2a22` | `Location.CUSTOM`（root/移动/大小写/权限/UI 第三档/四语文案） | §5.2 |
 | `fa5046d` | 旧偏好原地接管 + `LegacyStoragePathTest` 4 例 | §5.3、决策 4 |
 | `d9ffa4d` | 重编 `libstable_diffusion_core.so` + 重写 `core.json` | §5 末尾的更正 |
+| `4f30c1a` | 接管自选目录时把内置 `embeddings/` 播种到 root 下（+ 6 例测试） | 审阅后补的缺口 ① |
+| `08b2807` | 目录不可达/权限被关 → 模型页对话框 + 闸住下载入口 | 审阅后补的缺口 ② |
 
 ### 与计划的偏差（都是实测逼出来的，不是改主意）
 
@@ -148,17 +150,35 @@
    （native `main.cpp:854` 按 `--model_dir` 上两级找 embeddings），而旧设置存的值就是 models 目录本身。
    `LegacyStoragePath.relocateFlatRoot()` 把 `root/<id>` 改名到 `root/models/<id>`：同卷 rename，不复制数据，
    几十 GB 也是毫秒级；由文件系统状态判断，可重复调用，权限恢复时在模型页 resume 补做。
-   `embeddings/` 不跟随——改自定义目录之前它本来也一直留在内置存储，没有回归。
+   `embeddings/` 也一起搬过去，见第 7 条（`fa5046d` 落地时留下的缺口，不是设计选择）。
    结果是路径多套一层（`/sdcard/models/models/<id>`），换来的是三档布局统一 + embeddings 查找正确。
 5. **fork 的护栏合并成一个 `isUsableCustomRoot()`**：拒绝盘根与 `Download`/`DCIM`/`Pictures` 等共享顶层目录，
    接受空目录、已有上游布局的目录、以及「全是模型目录」的旧布局目录（最后这条正是原地接管能成立的原因）。
 6. **第一次 merge 提交编译不过**：`resolveFsPathFromUri` 原本挂在被删的 `ModelsStorageDialog.kt` 里（同包所以无需 import），
    而 fork 独有的 `runtime_libs` 导入在用它。`7145865` 单独修，保留 merge 提交的原貌。
+7. **接管自选目录时必须把 `embeddings/` 一起带过去**（`4f30c1a` 补，审阅时发现的缺口）。
+   反转文字（inversion）从来只写内置存储，即使模型在自选目录也一样，而 native 只认 root 边上的那份
+   （§2 的 `main.cpp:854`）⇒ 不处理的话用户切到自选目录后，已导入的 embeddings 在设置页看不见、
+   生成时也不生效，等于静默作废。`LegacyStoragePath.seedEmbeddings()` 复用上游的
+   `ModelStorage.moveTree`/`MoveJournal`（不另写拷贝逻辑），单独一个 journal 文件以免覆盖真迁移的断点记录；
+   跨卷所以是真拷贝。判据用**文件名集合**而不是「目标非空就跳过」：后者会让一次中断的播种永久卡住，
+   前者能续传且不覆盖 root 里已有的同名文件。这与「搬家不重下模型」是同一条承诺的两半。
+8. **上游没有 fork 原有的 `storageFallback` 提示**（审阅时发现的第二个缺口，本轮补）。fork 的模型页会在
+   自选目录不可用时显示一张红卡 +「去设置」；取上游后这条整条消失，于是权限被关 / 目录被删的情况表现为
+   **列表静静变空**，而用户最自然的反应是重新下载——那会往内置存储再写一份几十 GB。
+   本轮改成：`ModelStorage.storageProblem()` 把原因分成 `AccessLost`（权限被关，仅 API 30+ 判定，
+   否则 Android 10 上正常的老设备会被误报）与 `Unreachable`（权限没问题，目录本身读不了/写不了），
+   `ModelRepository` 在 `refreshAllModels()` 里**第一次 `getModelsDir()` 之前**取值——`modelsDir()` 会
+   `mkdirs()`，先问后查才能让被删的目录仍然表现为「不可达」。UI 表现为模型页一个对话框
+   （`AccessLost` → 「授予访问」+「知道了」；`Unreachable` → 只有「知道了」，并回显具体路径），
+   同一原因只弹一次，原因变了才重弹；下载入口在问题未解决前一律闸住并说明理由。
 
 ### 已验证
 
-- `./gradlew compileBasicDebugKotlin` 通过。
-- `./gradlew testBasicDebugUnitTest`：**12 例全绿** = 上游 `ModelStorageTest` 7 + 新增 `LegacyStoragePathTest` 4 + `ExampleUnitTest` 1。
+- `./gradlew compileBasicDebugKotlin` 通过（含本轮的对话框 + 下载闸门）。
+- `./gradlew testBasicDebugUnitTest`：**18 例全绿** = 上游 `ModelStorageTest` 7 + `LegacyStoragePathTest` 10 + `ExampleUnitTest` 1。
+  其中新增的 6 例专测 embeddings 播种：搬进 root、幂等（第二次调用不动）、root 已有同名文件时绝不覆盖、
+  root 缺的文件补齐、中断后的 `.moving` 残留下次能续完、内置目录空/缺失时直接跳过。
 - 合并后的 `basicDebug` manifest 里 `MANAGE_EXTERNAL_STORAGE` 恰好出现 1 次（来自 `src/basic`），`filter` 变体不声明。
 - **对拍**（客观判据）：`git diff --name-only upstream/master HEAD` ⊆ `git diff --name-only upstream/master master`，
   多余文件 0 个；差集 8 个全是存储抽象本体（`ModelStorage.kt`/`ModelMoveService.kt`/`ModelStorageSection.kt`/
@@ -171,10 +191,73 @@
   `assets/qnnlibs` 剩 5 个（Htp/V81/V81Skel/V81Stub/System）、`assets/ditlibs` 只剩 `libggml-htp-v81.so`；
   包内 `.so` 的 `.note.gnu.build-id` = `d253c1d7…4d61b`，与 `core.json` 记录一致（AGP strip 只少 8 字节段表，build-id 未变，
   所以设置页「matches recorded build-id」不会误报）；两份 manifest `abiVersion` 均为 5。
+- 本轮新文案 3 个 key（`model_storage_problem_title`/`_unreachable`/`_download_blocked`）四语齐全，
+  复用已有的 `model_storage_access_lost`/`model_storage_grant`/`got_it`/`cannot_download`；
+  四语 key 集合对齐检查只余**上游本就有**的 14–18 个缺翻（`delete_*`/`export_*`/`import_*`/`no_files` 等），
+  与本次改动无关。
+- `isRootUnreachable()` 不建目录这条是代码事实而非推测：它只走 `rootFor()`，而 `modelsDir()` 的 `mkdirs()`
+  在 `ModelStorage.kt:168-170`，`storageProblem` 的赋值点在 `refreshAllModels()` 里第一次 `getModelsDir()` 之前。
+- `08b2807` 之后重新 `./build-sm8850.sh debug basic` 出包（116 MB），并用
+  `aapt2 dump resources <apk>` 在**包内 resources.arsc** 里确认三个新 key 的 default/zh/ja/ko 四份文案都在
+  （`model_storage_problem_title` `0x7f0f01d5`、`_unreachable` `0x7f0f01d9`、`_download_blocked` `0x7f0f01c8`），
+  不是只看源文件。包装机没做：`build-sm8850.sh -d emulator-5554` 会把设备串当主机名解析而失败，
+  之后 `adb devices` 已空；且 x86_64 模拟器本来就跑不了 sm8850 包。
 
 ### 还没做
 
-- 真机冒烟（§7 的判据），重点是三条：旧目录原地接管后模型列表完整、Internal↔Custom 迁移中途 `force-stop` 能续传、
+- 真机冒烟（§7 的判据），重点是五条：旧目录原地接管后模型列表完整、接管后已导入的倒置在设置页仍看得见
+  且生成时生效（本轮的播种）、Internal↔Custom 迁移中途 `force-stop` 能续传、
+  到系统设置里关掉「所有文件访问」后模型页弹出可授权的对话框且下载被闸住、
   Qwen Image 2.1 在 1024² 能出图（验证 `all=disk` 真的把解码内存让出来了）。本机只挂着 x86_64 模拟器，跑不了 sm8850 包，
   所以装包后的验证归用户。
+- 本轮两个补丁只做到「编译 + 单测 + 打包」，**包装机与真机验收都还没做**；`docs` 之外没有再动 native。
 - 分支**未推送**，`master` 未动。
+
+## 10. 升级路径核对 + 模型目录的删除策略（2026-10-08 追加，逐处读代码得出）
+
+### 10.1 embeddings 只在内置存储、外部模型目录里没有——会不会被正确带走
+
+| 升级后所处档位 | `embeddings/` 的结局 | 依据 |
+|---|---|---|
+| INTERNAL（从没设过旧自定义目录） | 不用动：`rootFor(INTERNAL)=filesDir` ⇒ `root/embeddings` 本来就是 `filesDir/embeddings` | `ModelStorage.kt:151`/`:173` |
+| 旧自定义目录被原地接管 → CUSTOM | `seedEmbeddings` 把 `filesDir/embeddings` 整个搬进 `root/embeddings`（跨卷=真复制，`fd.sync()` 后才改名，内置副本最后删） | `LegacyStoragePath.kt:106-116` + 单测 `movesAppEmbeddingsIntoTheAdoptedRoot`/`fillsAnExistingButEmptyRootFolder` |
+| 在设置里主动 INTERNAL→DOWNLOADS/CUSTOM | 上游 `move()` 遍历 `MOVED_DIRS=[models, embeddings]`，倒置跟着走 | `ModelStorage.kt:82`/`:406-413` |
+| root 里已有**同名**文件 | 整条跳过，两边都留着，下次 resume 再判；不覆盖、不删 | `LegacyStoragePath.kt:158-159` |
+| root 有 A、内置有 B（名字不冲突） | 合并，只把 B 搬过去 | 单测 `addsAppEmbeddingsThatTheRootDoesNotHaveYet` |
+| 搬到一半被杀 | 内置还剩的文件不算冲突 ⇒ 下次调用续完 | 单测 `finishesAnInterruptedSeedOnTheNextCall` |
+
+⇒ 问的「升级时倒置只在内置、外部没有」= 表里第 2/3 行，能正确处理且有测试覆盖。**唯一漏网的是 Android 9/10**，见 10.3。
+
+### 10.2 模型目录里的删除动作清单
+
+| 位置 | 删什么 | 触发者 | 与「非用户点击不删」一致？ |
+|---|---|---|---|
+| `Model.deleteModel()`（`Model.kt:198-210`） | 整个模型目录 `deleteRecursively()` | 界面点删除 | ✅ |
+| `ModelStorage.move()`（`:402`） | 源侧 `temp_downloads/` | 用户确认的切换目录 | ✅（本就是移动的一部分） |
+| `ModelStorage.moveTree()`（`:482`/`:487`/`:510`/`:540`/`:542`） | 移空后的源目录、`.moving` 残片 | 用户确认的切换目录 / 原地接管的搬运 | ✅ |
+| `LegacyStoragePath.relocateFlatRoot()`（`:138`） | **只删它自己刚建且仍是空的** `models/` | 接管时 | ✅（不碰任何用户文件） |
+| `ModelDownloadService`（`:144`/`:168-171`/`:242`/`:330`） | `temp_downloads`、重下同名 zip 前的旧目录、失败残留、`.part` | 用户点下载 | ✅ |
+| `TempCleaner.clean()`（`:50`/`:78`） | 内置 `models/` 下无标记的残骸 + `temp_downloads` | 界面「清理临时文件」确认框（`ModelListScreen.kt:532-540`） | ✅ 且**只扫 INTERNAL**，共享/自选目录一概不碰 |
+| `Model.initializeModels()` → `createQwenImage21Model()`（`Model.kt:760`） | **`models/qwen_image_2_1/dit.gguf`（4 GB，旧 Q4_0 DiT 权重）** | **每次刷新列表自动**，不看用户意图 | ❌ 见 10.4 |
+
+其余 `delete()` 调用点（`TagAutocompleteRepository`/`HistoryManager`/`RuntimeManager`/`LogCapture`/
+`HistoryBackup`）都在模型目录之外，不在本条约束范围内。
+
+### 10.3 还没修的洞：Android 9/10 上接管不做搬迁
+
+`relocateIfNeeded()` 用 `hasAllFilesAccess()` 当闸门（`LegacyStoragePath.kt:96`），而它内含
+`isPublicStorageSupported()`（API 30+）⇒ **API ≤ 29 恒为 false，这条永远提前返回**。
+而 `adopt()` 不看 API 就设了 CUSTOM，于是 Android 9/10 上：目录仍是旧平面布局、`modelsDir()` 又 `mkdirs()`
+出一个空的 `root/models/` ⇒ 列表静静变空；新加的 `storageProblem` 也报不出来（`isAccessLost` 已按 API 分档为
+false，`isRootUnreachable` 看 root 本身确实可读可写）。minSdk 是 28，这是活路径。
+候选修法：把闸门换成 `ModelStorage.isAccessLost(context)`（它就是为「按 API 分档地判断权限」而生的）。
+
+### 10.4 还没修：`dit.gguf` 的自动删除
+
+`createQwenImage21Model()` 在**每次构建模型列表**时删 `models/qwen_image_2_1/dit.gguf`。
+新包（FP8）只要 `dit.safetensors`/`llm.gguf/llm_vision.gguf`，旧文件确实没人读；
+但若用户还没下新包，这一删就把他手里唯一那份 4 GB 权重抹掉了，且不会有任何提示。
+按 10.2 的规则这条不该留在自动路径里。三个候选：
+① 只在 `dit.safetensors` 已存在时才删（一行，保留回收 4 GB 的初衷）；
+② 挪进 `TempCleaner`，由「清理临时文件」按钮触发（用户主动，但当前只扫 INTERNAL，共享目录扫不到）；
+③ 干脆不删（代价：老安装的 4 GB 永久占位）。推荐 ①。
