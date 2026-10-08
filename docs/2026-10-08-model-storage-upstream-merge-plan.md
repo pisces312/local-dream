@@ -136,6 +136,7 @@
 | `4f30c1a` | 接管自选目录时把内置 `embeddings/` 播种到 root 下（+ 6 例测试） | 审阅后补的缺口 ① |
 | `08b2807` | 目录不可达/权限被关 → 模型页对话框 + 闸住下载入口 | 审阅后补的缺口 ② |
 | `0911467` | 接管搬迁按 API 分档放行 + `dit.gguf` 只在新包就位后才删 | §10.3、§10.4 |
+| `0a618b1` | 空的 `models/` 不再算「已就位」+ 每次刷新列表补做搬迁 | §10.5 |
 
 ### 与计划的偏差（都是实测逼出来的，不是改主意）
 
@@ -150,7 +151,7 @@
 4. **旧自定义目录不是「提示用户搬」，是自动 rename 下沉一层**。上游布局要求 `models/` 与 `embeddings/` 平级
    （native `main.cpp:854` 按 `--model_dir` 上两级找 embeddings），而旧设置存的值就是 models 目录本身。
    `LegacyStoragePath.relocateFlatRoot()` 把 `root/<id>` 改名到 `root/models/<id>`：同卷 rename，不复制数据，
-   几十 GB 也是毫秒级；由文件系统状态判断，可重复调用，权限恢复时在模型页 resume 补做。
+   几十 GB 也是毫秒级；由文件系统状态判断，可重复调用，权限什么时候恢复什么时候补做（§10.5）。
    `embeddings/` 也一起搬过去，见第 7 条（`fa5046d` 落地时留下的缺口，不是设计选择）。
    结果是路径多套一层（`/sdcard/models/models/<id>`），换来的是三档布局统一 + embeddings 查找正确。
 5. **fork 的护栏合并成一个 `isUsableCustomRoot()`**：拒绝盘根与 `Download`/`DCIM`/`Pictures` 等共享顶层目录，
@@ -177,9 +178,11 @@
 ### 已验证
 
 - `./gradlew compileBasicDebugKotlin` 通过（含本轮的对话框 + 下载闸门）。
-- `./gradlew testBasicDebugUnitTest`：**18 例全绿** = 上游 `ModelStorageTest` 7 + `LegacyStoragePathTest` 10 + `ExampleUnitTest` 1。
-  其中新增的 6 例专测 embeddings 播种：搬进 root、幂等（第二次调用不动）、root 已有同名文件时绝不覆盖、
+- `./gradlew testBasicDebugUnitTest`：**21 例全绿** = 上游 `ModelStorageTest` 7 + `LegacyStoragePathTest` 13 + `ExampleUnitTest` 1。
+  其中 6 例专测 embeddings 播种：搬进 root、幂等（第二次调用不动）、root 已有同名文件时绝不覆盖、
   root 缺的文件补齐、中断后的 `.moving` 残留下次能续完、内置目录空/缺失时直接跳过。
+  `0a618b1` 再加 3 例专测「空的 `models/`」：只被 `mkdirs()` 建出来的空目录照样下沉（并验证下沉后二次调用为 no-op）、
+  `models/` 已有内容时一个字都不动、以及这次没建出来的空 `models/` 不会被删掉（删除只允许发生在自己刚建且仍空的那个上）。
 - 合并后的 `basicDebug` manifest 里 `MANAGE_EXTERNAL_STORAGE` 恰好出现 1 次（来自 `src/basic`），`filter` 变体不声明。
 - **对拍**（客观判据）：`git diff --name-only upstream/master HEAD` ⊆ `git diff --name-only upstream/master master`，
   多余文件 0 个；差集 8 个全是存储抽象本体（`ModelStorage.kt`/`ModelMoveService.kt`/`ModelStorageSection.kt`/
@@ -207,14 +210,20 @@
 
 ### 还没做
 
-- 真机冒烟（§7 的判据），重点是五条：旧目录原地接管后模型列表完整、接管后已导入的倒置在设置页仍看得见
+- 真机冒烟（§7 的判据），重点是六条：旧目录原地接管后模型列表完整、接管后已导入的倒置在设置页仍看得见
   且生成时生效（本轮的播种）、Internal↔Custom 迁移中途 `force-stop` 能续传、
   到系统设置里关掉「所有文件访问」后模型页弹出可授权的对话框且下载被闸住、
+  **先拒权限再授权**的顺序下（即 §10.5 那条路径）授权回来后列表应自己恢复，不需要进设置页、
+  也不该出现「空的 `models/` 把平面目录永远封住」，
   Qwen Image 2.1 在 1024² 能出图（验证 `all=disk` 真的把解码内存让出来了）。包已装到真机，
   点击层的验收归用户（此前只挂着 x86_64 模拟器，跑不了 sm8850 包）。
-- 本轮三个补丁（`4f30c1a`/`08b2807`/`0911467`）：编译 + 18 例单测 + 重新打包 + `adb install -r` 到真机
+- 本轮四个补丁（`4f30c1a`/`08b2807`/`0911467`/`0a618b1`）：编译 + 21 例单测 + 重新打包 + `adb install -r` 到真机
   （Honor `BKQ-AN80`，`ro.soc.model=SM8850`，API 37）均 Success，`versionName=3.0.0-alpha.5_debug`。
   **界面点击层的验收还没做**，按分工归用户；`docs` 之外没有再动 native。
+- 装机时序要说清：`0a618b1` 的**功能代码**（`relocateFlatRoot` 新判据 + 刷列表补做 + `customPath` 守卫）已在那次
+  Success 的包里；提交之后只剩 `Model.kt` 一行注释措辞的改动，重出的包（116 MB）准备好时设备已从
+  `adb devices` 掉线（mDNS 串消失，`adb get-state` = no devices），所以**最后一版没再装第二次**。
+  两者只差一行注释，行为一致；真机重连后直接 `adb install -r` 那个文件即可。
 - §10.3 的 Android 9/10 放行**在这台机器上无法实测**：真机是 Android 15/16，模拟器是 x86_64 跑不了 sm8850 包，
   所以那条只有代码走查作为依据。有 Android 9/10 设备时可以这样验：旧包设过自定义目录 → 装新包 → 列表应完整、
   设置里「自定义文件夹」应显示为已选中且能改回应用存储。
@@ -246,7 +255,7 @@
 | `Model.deleteModel()`（`Model.kt:198-210`） | 整个模型目录 `deleteRecursively()` | 界面点删除 | ✅ |
 | `ModelStorage.move()`（`:402`） | 源侧 `temp_downloads/` | 用户确认的切换目录 | ✅（本就是移动的一部分） |
 | `ModelStorage.moveTree()`（`:482`/`:487`/`:510`/`:540`/`:542`） | 移空后的源目录、`.moving` 残片 | 用户确认的切换目录 / 原地接管的搬运 | ✅ |
-| `LegacyStoragePath.relocateFlatRoot()`（`:138`） | **只删它自己刚建且仍是空的** `models/` | 接管时 | ✅（不碰任何用户文件） |
+| `LegacyStoragePath.relocateFlatRoot()`（`:154`） | **只删本次自己建出来、且搬完仍是空的** `models/`（`created` 在 `:145`；不是本次建的一律不删） | 接管时 / 每次刷新列表（§10.5） | ✅（不碰任何用户文件） |
 | `ModelDownloadService`（`:144`/`:168-171`/`:242`/`:330`） | `temp_downloads`、重下同名 zip 前的旧目录、失败残留、`.part` | 用户点下载 | ✅ |
 | `TempCleaner.clean()`（`:50`/`:78`） | 内置 `models/` 下无标记的残骸 + `temp_downloads` | 界面「清理临时文件」确认框（`ModelListScreen.kt:532-540`） | ✅ 且**只扫 INTERNAL**，共享/自选目录一概不碰 |
 | `Model.initializeModels()` → `createQwenImage21Model()`（`Model.kt:756-764`） | ~~无条件~~ **仅当 `dit.safetensors` 已在**才删 `models/qwen_image_2_1/dit.gguf`（旧 Q4_0 DiT 权重 4 GB） | 每次刷新列表自动 | ✅ 本轮加前置条件后不再是「无谓的删除」：新包没就位时一份文件都不动 |
@@ -276,3 +285,31 @@ API ≤29 恒 false ⇒ rename 与播种照常执行；API 30+ 未授权时仍�
 **改法（本轮）**：加前置条件 `File(modelDir, "dit.safetensors").isFile` 才删，保留上游回收 4 GB 的初衷，
 又不会出现「新的还没就位、旧的先被抹掉」。代价：还没下新包的用户那 4 GB 继续占位，下完新包后第一次刷新列表回收。
 将来同步上游时这条要**保留 fork 版本**，别默认取上游把它带回无条件删除。
+
+### 10.5 已修：空的 `models/` 会永久封住接管（`0a618b1`）
+
+回答「embedding 只从内置搬过去一次吗」时顺带查出来的死胡同，与 §10.3 是同一类问题（权限来得比接管晚），
+但这条连授权之后都修不好。现象链（逐处读代码得出）：
+
+1. `adopt()` 一生只跑一次：见到 `customPath != null` 就返回（`LegacyStoragePath.kt:52`），
+   所以接管之后只有设置页存储区的 resume 还会叫 `relocateIfNeeded()`（`ModelStorageSection.kt:366`）。
+2. 而那一次可能因为没权限提前返回——API 30+ 未授予「所有文件访问」时 `isAccessLost` 为 true（§10.3 的闸门）。
+3. 与此同时 `modelsDir()` 会 `mkdirs()`（`ModelStorage.kt:169-171`），而刷新列表第一件事就问它
+   ⇒ 自选目录里留下一个**空的 `models/`**。
+4. 旧判据「`models/` 存在 = 布局已就位」（原 `:129`）从此让 `relocateFlatRoot()` 永远返回 0。
+
+结果：用户在新加的模型页对话框里点「授予访问」回来后，`storageProblem` 是 null（root 可达、权限也有，
+它查不出「文件在错的层级」），列表仍然空，且再没有任何提示——只有去 设置→模型存储 让那段 resume 跑一次才可能自愈。
+
+| 位置 | 改动 | 为什么这样判 |
+|---|---|---|
+| `relocateFlatRoot()`（`:140`） | 「`models/` 存在**且有内容**」才算已就位，空的照旧下沉 | 空的那个是我们自己 `mkdirs()` 出来的，不是布局信号 |
+| `relocateFlatRoot()`（`:145`/`:154`） | 收尾 `delete()` 只删**本次建出来且搬完仍空**的目录 | §10.2 的规则：不是本次建的就不该由它删 |
+| `refreshAllModels()`（`Model.kt:1143`） | 算 `storageProblem` 之前，在 IO 线程补一次 `relocateIfNeeded()` | 每次重扫都自愈；模型页授权回调走的正是这条 |
+| `relocateIfNeeded()`（`:95`） | `CUSTOM` 但没记路径时直接返回 | `rootFor()` 那种情况回答的是 `filesDir`（`ModelStorage.kt:161`），继续走下去会把**应用自己的文件**搬进 `models/`；这个守卫在把 `relocateIfNeeded` 挂到每次刷列表之后才变得要紧 |
+
+幂等性有测试断言：搬完 `models/` 就有内容 ⇒ 第二次调用返回 0（`relocatesIntoAModelsFolderThatWasOnlyCreated`），
+`models/` 已有内容时旁边的散目录一律不动（`doesNotReachIntoAModelsFolderThatAlreadyHoldsSomething`），
+本次没建出来的空 `models/` 不会被删（`keepsAnEmptyModelsFolderItDidNotCreate`）。
+副作用是刷新列表多一次 `relocateIfNeeded`（几次 `listFiles()`，空跑时不写盘），以及每次刷列都会
+`journal.clear()` 那个**接管专用** journal 文件——它是独立文件名，不会覆盖真迁移的断点记录（`:36-39` 的原注释）。
