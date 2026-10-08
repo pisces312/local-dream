@@ -2,6 +2,7 @@ package io.github.xororz.localdream.utils
 
 import android.content.Context
 import android.util.Log
+import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.service.ModelDownloadService
@@ -30,8 +31,8 @@ import kotlinx.coroutines.withContext
  * an active transfer (a model dir being populated by a rename), and while a
  * move between storage locations runs or is unfinished, since a half-moved
  * model looks just like a half-extracted one. The models sweep covers app
- * storage only: in the public Download/LocalDream folder an unrecognized dir
- * may belong to the person or to another app.
+ * storage only: in a shared folder (Download/LocalDream or a custom one) an
+ * unrecognized dir may belong to the person or to another app.
  */
 object TempCleaner {
     private const val TAG = "TempCleaner"
@@ -104,12 +105,13 @@ object TempCleaner {
         // Built-in models (managed from the model list, downloaded or not).
         if (ModelRepository.isReservedModelId(name)) return true
         // Upscalers share the models dir; never touch them.
-        if (name.startsWith("upscaler") || File(entry, "upscaler.bin").exists()) return true
+        if (name.startsWith("upscaler") || File(entry, Model.UPSCALER_FILE_NAME).exists()) return true
         // Custom models are only listed once one of these markers is written,
-        // so a marker-less dir is an unusable, half-finished import.
-        return File(entry, "finished").exists() ||
-            File(entry, "npucustom").exists() ||
-            File(entry, "SDXL").exists()
+        // so a marker-less dir is an unusable, half-finished import. Read from
+        // the shared list: a marker added for a new architecture must not be
+        // recognised by the scan but unknown here, or this cleaner would
+        // delete a live model.
+        return Model.CUSTOM_MODEL_MARKERS.any { marker -> File(entry, marker).exists() }
     }
 
     private fun sizeOf(file: File): Long = if (file.isDirectory) {

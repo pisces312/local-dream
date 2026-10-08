@@ -9,6 +9,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.xororz.localdream.LocalDreamApplication
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.service.ModelDownloadService
 import java.io.File
@@ -322,6 +323,18 @@ data class Model(
 
         fun getModelsDir(context: Context): File = ModelStorage.modelsDir(context)
 
+        /**
+         * Written by the download service once every file of a built-in model
+         * is in place. A non-empty directory alone is not proof of a usable
+         * model: an extraction killed half way leaves files behind, and the
+         * failure then only surfaces in the native loader.
+         *
+         * Directories written before this marker existed are stamped during
+         * ModelRepository.refreshAllModels(), so upgrading does not turn every
+         * installed model into "not downloaded".
+         */
+        const val COMPLETE_MARKER = ".complete"
+
         fun isModelDownloaded(context: Context, modelId: String, isCustom: Boolean = false): Boolean {
             if (isCustom) {
                 return true
@@ -332,8 +345,25 @@ data class Model(
                 return false
             }
 
-            val files = modelDir.listFiles()
-            return files != null && files.isNotEmpty()
+            return File(modelDir, COMPLETE_MARKER).isFile
+        }
+
+        /**
+         * Stamps directories that predate [COMPLETE_MARKER]: any non-empty
+         * model directory is treated as complete and marked, so the strict
+         * check above does not hide models installed by earlier versions.
+         *
+         * Best effort — a read-only directory simply keeps being judged by the
+         * legacy rule on the next run.
+         */
+        fun backfillCompleteMarkers(modelsDir: File) {
+            modelsDir.listFiles()?.forEach { dir ->
+                if (!dir.isDirectory) return@forEach
+                if (File(dir, COMPLETE_MARKER).exists()) return@forEach
+                if (dir.listFiles().isNullOrEmpty()) return@forEach
+                runCatching { File(dir, COMPLETE_MARKER).createNewFile() }
+                    .onFailure { Log.w("Model", "Could not stamp ${dir.name}", it) }
+            }
         }
 
         fun isDitPackageDownloaded(
@@ -352,10 +382,31 @@ data class Model(
             }
         }
 
+        // Markers that turn a directory in the models dir into a usable model.
+        // Single source of truth: the custom-model scan and TempCleaner both
+        // read this list, so a marker added later cannot end up recognised in
+        // one place only (which would make the cleaner delete live models).
+        const val MARKER_ZIMAGE = "ZIMAGE"
+        const val MARKER_KLEIN = "KLEIN"
+        const val MARKER_QWEN_IMAGE_2_1 = "QWEN_IMAGE_2_1"
+        const val MARKER_ANIMA = "ANIMA"
+        const val MARKER_SDXL = "SDXL"
+        const val MARKER_FINISHED = "finished"
+        const val MARKER_NPU_CUSTOM = "npucustom"
+        val CUSTOM_MODEL_MARKERS = listOf(
+            MARKER_ZIMAGE,
+            MARKER_KLEIN,
+            MARKER_QWEN_IMAGE_2_1,
+            MARKER_ANIMA,
+            MARKER_SDXL,
+            MARKER_FINISHED,
+            MARKER_NPU_CUSTOM,
+        )
+
         private fun markerFileName(ditKind: String): String = when (ditKind) {
-            "zimage" -> "ZIMAGE"
-            "klein" -> "KLEIN"
-            "qwen21" -> "QWEN_IMAGE_2_1"
+            "zimage" -> MARKER_ZIMAGE
+            "klein" -> MARKER_KLEIN
+            "qwen21" -> MARKER_QWEN_IMAGE_2_1
             else -> ""
         }
 
@@ -510,6 +561,15 @@ class ModelRepository private constructor(private val context: Context) {
     var isLoaded by mutableStateOf(false)
         private set
 
+    // Why the list is empty although the models live outside app storage: the
+    // permission was revoked, or the folder itself cannot be read or written
+    // (deleted, card unmounted, read-only). Nothing is wrong with the models in
+    // either case, but without a word here the list silently empties and the
+    // natural reaction — re-downloading — writes a second copy of every
+    // gigabyte into app storage.
+    var storageProblem by mutableStateOf<ModelStorage.StorageProblem?>(null)
+        private set
+
     suspend fun ensureLoaded() {
         if (isLoaded) return
         refreshAllModels()
@@ -532,34 +592,26 @@ class ModelRepository private constructor(private val context: Context) {
                     return@forEach
                 }
 
-                val finishedFile = File(dir, "finished")
-                val npuCustomFile = File(dir, "npucustom")
-                val sdxlFile = File(dir, "SDXL")
-                val animaFile = File(dir, "ANIMA")
-                val zImageFile = File(dir, "ZIMAGE")
-                val kleinFile = File(dir, "KLEIN")
-                val qwenImage21File = File(dir, "QWEN_IMAGE_2_1")
-
                 when {
-                    zImageFile.exists() && DitEngine.isSupportedDevice() ->
+                    File(dir, Model.MARKER_ZIMAGE).isFile && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "zimage"))
 
-                    kleinFile.exists() && DitEngine.isSupportedDevice() ->
+                    File(dir, Model.MARKER_KLEIN).isFile && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "klein"))
 
-                    qwenImage21File.exists() && DitEngine.isSupportedDevice() ->
+                    File(dir, Model.MARKER_QWEN_IMAGE_2_1).isFile && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21"))
 
-                    animaFile.exists() ->
+                    File(dir, Model.MARKER_ANIMA).isFile ->
                         customModels.add(createCustomModel(dir, isNpu = true, isAnima = true))
 
-                    sdxlFile.exists() ->
+                    File(dir, Model.MARKER_SDXL).isFile ->
                         customModels.add(createCustomModel(dir, isNpu = !File(dir, "unet.mnn").exists(), isSdxl = true))
 
-                    finishedFile.exists() ->
+                    File(dir, Model.MARKER_FINISHED).isFile ->
                         customModels.add(createCustomModel(dir, isNpu = false))
 
-                    npuCustomFile.exists() ->
+                    File(dir, Model.MARKER_NPU_CUSTOM).isFile ->
                         customModels.add(createCustomModel(dir, isNpu = true))
                 }
             }
@@ -704,8 +756,12 @@ class ModelRepository private constructor(private val context: Context) {
     private fun createQwenImage21Model(): Model {
         val id = "qwen_image_2_1"
         // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
-        // replaced it and nothing reads the old file, so reclaim its 4GB.
-        File(File(Model.getModelsDir(context), id), "dit.gguf").delete()
+        // replaced it and nothing reads the old file, so reclaim its 4GB —
+        // but only once the replacement is actually on disk. This runs on every
+        // list refresh, and the models folder may be one the user picked in
+        // Settings, where deleting his weights without asking is not ours to do.
+        val modelDir = File(Model.getModelsDir(context), id)
+        if (File(modelDir, "dit.safetensors").isFile) File(modelDir, "dit.gguf").delete()
         return Model(
             id = id,
             name = "Qwen Image 2.1",
@@ -1077,8 +1133,26 @@ class ModelRepository private constructor(private val context: Context) {
 
     suspend fun refreshAllModels() {
         refreshMutex.withLock {
+            // Where the models live is decided before this scans anything else.
+            (context.applicationContext as? LocalDreamApplication)?.awaitStorageAdoption()
+            // Adoption itself only fires once, for the retired preference. A root
+            // that became readable later — All files access granted from the
+            // dialog on this very page — still holds its models flat, so every
+            // rescan closes it. Idempotent: it renames nothing once models/ has
+            // entries, and it can copy embeddings, so it belongs on IO.
+            withContext(Dispatchers.IO) { LegacyStoragePath.relocateIfNeeded(context) }
+            // Asked before the first getModelsDir() below: that one creates the
+            // folder it is asked for, so a deleted root would look reachable by
+            // the time this were checked afterwards.
+            storageProblem = ModelStorage.storageProblem(context)
             baseUrl = generationPreferences.getBaseUrl()
-            models = withContext(Dispatchers.IO) { initializeModels() }
+            models = withContext(Dispatchers.IO) {
+                // Stamp dirs written before COMPLETE_MARKER existed, or the
+                // stricter isModelDownloaded() would hide every model that was
+                // already installed.
+                Model.backfillCompleteMarkers(Model.getModelsDir(context))
+                initializeModels()
+            }
             isLoaded = true
         }
     }

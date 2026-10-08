@@ -40,11 +40,17 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.LegacyStoragePath
 import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.data.ModelStorage.Location
 import io.github.xororz.localdream.data.ModelStorage.MoveState
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
+import io.github.xororz.localdream.utils.CustomRootProblem
+import io.github.xororz.localdream.utils.customRootProblem
+import io.github.xororz.localdream.utils.holdsModels
+import io.github.xororz.localdream.utils.resolveFsPathFromUri
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,14 +76,31 @@ internal fun ModelStorageSection() {
     var confirmTarget by remember { mutableStateOf<Location?>(null) }
     var confirmBytes by remember { mutableStateOf(0L) }
     var awaitingAccessFor by remember { mutableStateOf<Location?>(null) }
+    // The folder a pick replaced, kept so a folder that fails the usability
+    // check restores it instead of clobbering a working setup.
+    var customPathBackup by remember { mutableStateOf<String?>(null) }
+    var hasCustomPathBackup by remember { mutableStateOf(false) }
+    // Both the picked folder and the current location hold models: ask
+    // whether to use the folder as it is or to merge the models into it.
+    var adoptOrMerge by remember { mutableStateOf(false) }
 
     val msgBusy = stringResource(R.string.model_storage_busy)
     val msgNoAccess = stringResource(R.string.model_storage_no_access)
+    val msgCustomUnusable = stringResource(R.string.model_storage_custom_unusable)
+    val msgCustomPublic = stringResource(R.string.model_storage_custom_public)
+    val msgCustomReadOnly = stringResource(R.string.model_storage_custom_read_only)
+    val msgCustomNoModels = stringResource(R.string.model_storage_custom_no_models)
+    val msgAdopted = stringResource(R.string.model_storage_adopted)
+
+    val customPath = remember(revision, moveState) { ModelStorage.customPath(context) }
 
     // After an unfinished move either location is a valid target: the
     // one it was headed for finishes it, the other one moves the files back.
     fun canMoveTo(target: Location): Boolean = target != ModelStorage.location(context) ||
-        ModelStorage.pendingMove(context) != null
+        ModelStorage.pendingMove(context) != null ||
+        // While CUSTOM is in effect, picking a *different* folder is a move too.
+        (target == Location.CUSTOM &&
+            ModelStorage.rootFor(context, target).absolutePath != ModelStorage.root(context).absolutePath)
 
     fun startMove(target: Location) {
         if (!ModelStorage.startMove(context, target)) {
@@ -85,10 +108,11 @@ internal fun ModelStorageSection() {
         }
     }
 
-    fun askToMove(target: Location) {
+    fun proceedWithMove(target: Location) {
         scope.launch {
             val bytes = withContext(Dispatchers.IO) {
-                ModelStorage.sizeAt(context, ModelStorage.other(target))
+                // The move starts from wherever the models are right now.
+                ModelStorage.sizeAt(context, ModelStorage.location(context))
             }
             if (bytes == 0L) {
                 startMove(target)
@@ -96,6 +120,73 @@ internal fun ModelStorageSection() {
                 confirmBytes = bytes
                 confirmTarget = target
             }
+        }
+    }
+
+    // Uses the picked folder where it is: no model moves, the old flat layout
+    // is renamed down into models/, and the app-storage embeddings are seeded
+    // beside them (see LegacyStoragePath.relocateIfNeeded).
+    fun adoptCustomInPlace() {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                ModelStorage.selectInPlace(context, Location.CUSTOM)
+                LegacyStoragePath.relocateIfNeeded(context)
+            }
+            revision++
+            Toast.makeText(context, msgAdopted, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun askToMove(target: Location) {
+        scope.launch {
+            if (target == Location.CUSTOM) {
+                // The picked folder was recorded before All files access was
+                // granted (checking it needs that very permission), so this
+                // is where its usability is decided. A folder that fails
+                // restores the one it replaced.
+                val problem = withContext(Dispatchers.IO) {
+                    customRootProblem(ModelStorage.rootFor(context, Location.CUSTOM))
+                }
+                if (problem != null) {
+                    if (hasCustomPathBackup) {
+                        ModelStorage.setCustomRoot(context, customPathBackup)
+                        hasCustomPathBackup = false
+                        customPathBackup = null
+                    }
+                    revision++
+                    val message = when (problem) {
+                        CustomRootProblem.VOLUME_ROOT, CustomRootProblem.PUBLIC_DIR -> msgCustomPublic
+                        CustomRootProblem.NOT_WRITABLE -> msgCustomReadOnly
+                        CustomRootProblem.NO_MODELS -> msgCustomNoModels
+                    }
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                hasCustomPathBackup = false
+                customPathBackup = null
+
+                // A folder that already holds models can simply be used where
+                // it is. When app storage has no models of its own that is
+                // the obvious thing to do; when both sides hold models the
+                // person picks between this and merging theirs into it.
+                val dstHoldsModels = withContext(Dispatchers.IO) {
+                    ModelStorage.rootFor(context, Location.CUSTOM).holdsModels()
+                }
+                if (dstHoldsModels) {
+                    val srcHoldsModels = withContext(Dispatchers.IO) {
+                        File(ModelStorage.root(context), "models").holdsModels()
+                    }
+                    if (!srcHoldsModels && ModelStorage.location(context) == Location.INTERNAL) {
+                        adoptCustomInPlace()
+                        return@launch
+                    }
+                    if (srcHoldsModels) {
+                        adoptOrMerge = true
+                        return@launch
+                    }
+                }
+            }
+            proceedWithMove(target)
         }
     }
 
@@ -129,12 +220,45 @@ internal fun ModelStorageSection() {
             Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
             return
         }
-        // Either direction touches Download/LocalDream.
+        // Any shared location, in either direction, needs All files access.
         if (!ModelStorage.hasAllFilesAccess()) {
             requestAccess(target)
         } else {
             askToMove(target)
         }
+    }
+
+    // CUSTOM is never chosen by the radio button alone: a folder has to be
+    // picked first, and only once it resolves to a usable path does anything
+    // move. Re-picking while CUSTOM is in effect moves the models to the new
+    // folder (or is a no-op when it is the same one).
+    val pickCustomLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        revision++
+        if (uri == null) return@rememberLauncherForActivityResult
+        val path = resolveFsPathFromUri(context, uri)
+        if (path == null) {
+            Toast.makeText(context, msgCustomUnusable, Toast.LENGTH_LONG).show()
+            return@rememberLauncherForActivityResult
+        }
+        if (moveState is MoveState.Moving || ModelStorage.isBusy()) {
+            Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        // Recorded before the access grant, not after: validating the folder
+        // needs the very permission choose() may be about to request, so the
+        // check runs in askToMove() once access is settled. A rejected folder
+        // restores this backup.
+        hasCustomPathBackup = true
+        customPathBackup = ModelStorage.customPath(context)
+        ModelStorage.setCustomRoot(context, path)
+        choose(Location.CUSTOM)
+    }
+
+    fun pickCustomFolder() {
+        if (moveState is MoveState.Moving) return
+        pickCustomLauncher.launch(null)
     }
 
     Column {
@@ -179,6 +303,21 @@ internal fun ModelStorageSection() {
                 selected = current == Location.DOWNLOADS,
                 enabled = supported,
                 onClick = { choose(Location.DOWNLOADS) },
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            StorageOption(
+                title = locationLabel(Location.CUSTOM),
+                description = when {
+                    !supported -> stringResource(R.string.model_storage_public_unsupported)
+                    customPath != null -> stringResource(
+                        R.string.model_storage_custom_current,
+                        customPath,
+                    )
+                    else -> stringResource(R.string.model_storage_custom_hint)
+                },
+                selected = current == Location.CUSTOM,
+                enabled = supported,
+                onClick = { pickCustomFolder() },
             )
             if (pending != null && moveState !is MoveState.Moving) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -237,12 +376,33 @@ internal fun ModelStorageSection() {
             },
         )
     }
+
+    if (adoptOrMerge) {
+        AlertDialog(
+            onDismissRequest = { adoptOrMerge = false },
+            title = { Text(stringResource(R.string.model_storage_adopt_title)) },
+            text = { Text(stringResource(R.string.model_storage_adopt_or_merge)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    adoptOrMerge = false
+                    adoptCustomInPlace()
+                }) { Text(stringResource(R.string.model_storage_adopt_use)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    adoptOrMerge = false
+                    proceedWithMove(Location.CUSTOM)
+                }) { Text(stringResource(R.string.model_storage_adopt_merge)) }
+            },
+        )
+    }
 }
 
 @Composable
 private fun locationLabel(location: Location): String = when (location) {
     Location.INTERNAL -> stringResource(R.string.model_storage_internal)
     Location.DOWNLOADS -> stringResource(R.string.model_storage_public, ModelStorage.PUBLIC_FOLDER)
+    Location.CUSTOM -> stringResource(R.string.model_storage_custom)
 }
 
 @Composable
@@ -301,10 +461,20 @@ internal fun ModelStorageMoveOverlay(onModelsChanged: () -> Unit) {
     LaunchedEffect(Unit) { ModelStorage.resumePendingMove(context) }
 
     val msgAccessLost = stringResource(R.string.model_storage_access_lost)
+    val scope = rememberCoroutineScope()
     LifecycleResumeEffect(Unit) {
-        ModelStorage.pollAccessChange(context)?.let { hasAccess ->
-            if (!hasAccess) Toast.makeText(context, msgAccessLost, Toast.LENGTH_LONG).show()
-            currentOnModelsChanged()
+        // All files access is granted or revoked in system settings, outside the
+        // app, so resuming is where a flip is noticed. The rescan it triggers
+        // (refreshAllModels) is itself what relocates an adopted custom folder
+        // before reading it, so there is nothing to move here.
+        scope.launch {
+            val hasAccess = ModelStorage.pollAccessChange(context)
+            if (hasAccess != null) {
+                if (!hasAccess) {
+                    Toast.makeText(context, msgAccessLost, Toast.LENGTH_LONG).show()
+                }
+                currentOnModelsChanged()
+            }
         }
         onPauseOrDispose { }
     }

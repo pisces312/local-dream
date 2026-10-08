@@ -181,10 +181,20 @@ class ModelDownloadService : Service() {
                             unzipFile(tempFile, extractTempDir)
 
                             extractTempDir.listFiles()?.forEach { file ->
-                                file.renameTo(File(modelDir, file.name))
+                                val destFile = File(modelDir, file.name)
+                                if (!file.renameTo(destFile)) {
+                                    file.copyTo(destFile, overwrite = true)
+                                    file.delete()
+                                }
                             }
                             extractTempDir.delete()
                             extractTempDir = null
+
+                            // Last step on purpose: isModelDownloaded() only
+                            // trusts a dir carrying this marker, so a kill
+                            // during the extract leaves a dir the UI reports
+                            // as incomplete instead of a broken model.
+                            File(modelDir, Model.COMPLETE_MARKER).createNewFile()
                         }
                     }
 

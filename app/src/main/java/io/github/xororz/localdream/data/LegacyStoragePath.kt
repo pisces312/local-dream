@@ -1,0 +1,192 @@
+package io.github.xororz.localdream.data
+
+import android.content.Context
+import android.util.Log
+import io.github.xororz.localdream.utils.containsModelMarker
+import io.github.xororz.localdream.utils.isUsableCustomRoot
+import java.io.File
+import java.io.IOException
+
+/**
+ * One-time bridge from the fork's older custom-directory setting to
+ * [ModelStorage.Location.CUSTOM].
+ *
+ * The old setting stored just a path in the app's DataStore, and pointed at the
+ * **models directory itself** (`/storage/emulated/0/models/<id>/...`). The
+ * layout ModelStorage uses — and the layout the backend expects, since it reads
+ * `embeddings/` from two levels above `--model_dir` — keeps `models/` beside
+ * `embeddings/` under a root. Adopting an old folder therefore means renaming
+ * its contents down one level: same volume, so a rename rather than a copy, and
+ * it finishes in milliseconds however many gigabytes are in there. Nothing has
+ * to be moved by hand, and nothing leaves the device.
+ *
+ * Textual inversions never followed the old custom folder (they stayed in app
+ * storage even when the models did not), and the backend only reads them from
+ * beside the models — so adopting a folder would otherwise strand every
+ * embedding the user had imported: invisible in Settings, and ignored at
+ * generation time because the native side looks two levels above `--model_dir`.
+ * [seedEmbeddings] moves them into the root once, with the same tree mover a
+ * real location change uses.
+ */
+object LegacyStoragePath {
+    private const val TAG = "LegacyStoragePath"
+
+    private const val MODELS_DIR = "models"
+    private const val EMBEDDINGS_DIR = "embeddings"
+
+    // Not ModelStorage's own journal: that one names the single file an
+    // interrupted move may have left on both sides, and this step must never
+    // rewrite it.
+    private const val JOURNAL = "legacy_storage_journal"
+
+    // Names this app writes at the root itself; anything else belongs under models/.
+    private val ROOT_OWN_NAMES = setOf(MODELS_DIR, EMBEDDINGS_DIR, "temp_downloads", ".nomedia")
+
+    /**
+     * Reads the retired preference once and, if it named a folder, points
+     * CUSTOM at it without copying anything. Runs before the first model scan
+     * (see LocalDreamApplication) so the list is never built from the wrong
+     * root. Returns whether it changed anything.
+     */
+    suspend fun adopt(context: Context): Boolean {
+        val app = context.applicationContext
+        if (ModelStorage.customPath(app) != null) return false
+        val legacy = runCatching { GenerationPreferences(app).getModelsStoragePath() }.getOrNull()
+        if (legacy.isNullOrBlank()) return false
+        val dir = File(legacy)
+        // Adopt only a folder that really holds models. An old setting that was
+        // saved while the models still lived in app storage must not hide them
+        // behind an empty custom root.
+        if (dir.listFiles().orEmpty().none { it.isDirectory && it.containsModelMarker() }) {
+            Log.i(TAG, "legacy custom directory holds no models, staying in app storage: $legacy")
+            return false
+        }
+        // Reject a folder we could actually read and would not pick ourselves.
+        // Without All files access every shared folder looks unusable, and
+        // switching to CUSTOM is still right — Settings then offers the grant
+        // instead of pretending the models were never anywhere.
+        if (ModelStorage.hasAllFilesAccess() && !isUsableCustomRoot(dir)) {
+            Log.w(TAG, "legacy custom directory cannot hold models, staying in app storage: $legacy")
+            return false
+        }
+        ModelStorage.setCustomRoot(app, legacy)
+        ModelStorage.selectInPlace(app, ModelStorage.Location.CUSTOM)
+        // Consumed for good: the folder lives in ModelStorage's own prefs from
+        // here on, and the flat -> models/ relocation is detected from the
+        // filesystem on the first scan (see relocateIfNeeded, called from
+        // ModelRepository.refreshAllModels), so the retired key must not fire a
+        // second time.
+        runCatching { GenerationPreferences(app).saveModelsStoragePath(null) }
+            .onFailure { Log.w(TAG, "could not clear the retired storage path", it) }
+        Log.i(TAG, "adopted legacy custom directory: $legacy")
+        return true
+    }
+
+    /**
+     * Renames a flat (pre-layout) custom folder down into `models/` so its
+     * layout matches the other locations, and moves app-storage embeddings
+     * beside it. Detected from the filesystem, so it is safe to call on every
+     * resume and does nothing once the folder is already laid out. Returns
+     * whether anything moved.
+     */
+    fun relocateIfNeeded(context: Context): Boolean {
+        if (ModelStorage.location(context) != ModelStorage.Location.CUSTOM) return false
+        // CUSTOM with no folder recorded makes rootFor answer with app storage,
+        // and this would then reorganize the app's own files. Nothing to adopt
+        // until a folder is actually picked.
+        if (ModelStorage.customPath(context) == null) return false
+        // A move in flight owns both sides; it would race this and lose.
+        if (ModelStorage.moveState.value is ModelStorage.MoveState.Moving) return false
+        // Not the All files access check: below Android 11 shared folders are
+        // reached through the legacy storage permission, and bailing there would
+        // leave the folder flat behind an empty models/ with nothing to say about
+        // it. isAccessLost is the API-aware form of "we may not read this yet".
+        if (ModelStorage.isAccessLost(context)) return false
+        val root = ModelStorage.rootFor(context, ModelStorage.Location.CUSTOM)
+        var changed = false
+        val moved = relocateFlatRoot(root)
+        if (moved > 0) {
+            Log.i(TAG, "relocated $moved entries of ${root.path} into $MODELS_DIR/")
+            changed = true
+        }
+        // Its own journal file: an interrupted move keeps a record in
+        // ModelStorage's, and this step must never overwrite it.
+        val journal = ModelStorage.MoveJournal(File(context.noBackupFilesDir, JOURNAL))
+        val source = File(context.filesDir, EMBEDDINGS_DIR)
+        val seeded = runCatching { seedEmbeddings(source, File(root, EMBEDDINGS_DIR), journal) }
+        if (seeded.getOrDefault(false)) {
+            Log.i(TAG, "moved app embeddings into ${root.path}/$EMBEDDINGS_DIR")
+            changed = true
+        }
+        // A failed seed only means app storage keeps a copy it can no longer
+        // serve; the models themselves are unaffected, so say so and move on.
+        seeded.exceptionOrNull()?.let { Log.w(TAG, "embeddings could not be moved", it) }
+        journal.clear()
+        return changed
+    }
+
+    /**
+     * `root/<entry>` -> `root/models/<entry>` for everything that is not part
+     * of the layout already. Returns how many entries moved, 0 when there was
+     * nothing to do — kept free of android.util.Log so the JVM test can drive
+     * it directly.
+     */
+    internal fun relocateFlatRoot(root: File): Int {
+        if (!root.isDirectory) return 0
+        val models = File(root, MODELS_DIR)
+        // An empty models/ is not the layout already being in place. rootFor /
+        // modelsDir() mkdirs that folder whenever anything asks for it, so a root
+        // adopted before it was readable would keep its models flat behind an
+        // empty models/ forever, with the list permanently empty. Entries inside
+        // it are the real signal that a relocation already happened.
+        if (models.isDirectory && models.listFiles().orEmpty().isNotEmpty()) return 0
+        val entries = root.listFiles()?.filter { it.name !in ROOT_OWN_NAMES } ?: return 0
+        // Only a folder that actually holds subfolders counts as the old
+        // layout; an empty or unrelated one keeps its files where they are.
+        if (entries.none { it.isDirectory }) return 0
+        val created = !models.exists()
+        if (!models.isDirectory && !models.mkdirs()) return 0
+        var moved = 0
+        for (entry in entries) {
+            if (entry.renameTo(File(models, entry.name))) moved++
+        }
+        // Drop only a models/ this call made and left empty. One that was
+        // already here — ours or not — keeps whatever is in it, since nothing
+        // here may delete files the user put there.
+        if (moved == 0 && created) models.delete()
+        return moved
+    }
+
+    /**
+     * `filesDir/embeddings` -> `root/embeddings`, the one part of the adoption
+     * that really copies (app storage and shared storage are different mounts).
+     * Uses the same tree mover as a location change, so a file reaches its
+     * final name only after it is fully on disk and the app-side copy goes last.
+     *
+     * A name both sides hold is skipped file by file rather than stranding
+     * everything: deciding which of two `inv.safetensors` wins is not this
+     * function's call, so the root copy stays and the app copy keeps its own —
+     * but every other file still moves, so a root that already has some
+     * embeddings picks up the rest, and a copy interrupted half way finishes
+     * on the next call (the pair the journal names is handed to the mover,
+     * which completes it). Returns whether it moved something — kept free of
+     * android.util.Log so the JVM test can drive it.
+     */
+    internal fun seedEmbeddings(source: File, destination: File, journal: ModelStorage.MoveJournal): Boolean {
+        val files = source.listFiles()?.filter { it.isFile }.orEmpty()
+        if (files.isEmpty()) return false
+        if (!destination.isDirectory && !destination.mkdirs()) {
+            throw IOException("cannot create ${destination.path}")
+        }
+        var moved = false
+        for (src in files) {
+            val dst = File(destination, src.name)
+            if (dst.exists() && !journal.names(src, dst)) continue
+            ModelStorage.moveTree(src, dst, journal) { }
+            moved = true
+        }
+        // Gone once every file has left it; kept while skipped copies remain.
+        if (moved && source.listFiles().orEmpty().isEmpty()) source.delete()
+        return moved
+    }
+}

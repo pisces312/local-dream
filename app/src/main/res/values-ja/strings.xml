@@ -522,7 +522,7 @@
     <string name="model_storage_internal_hint">Local Dream 専用です。アプリをアンインストールすると削除されます。</string>
     <string name="model_storage_public_hint">ファイルマネージャーから見え、アンインストール後も残ります。「すべてのファイルへのアクセス」を持つ他のアプリが、再ダウンロードせずにこれらのモデルを使えます。「すべてのファイルへのアクセス」が必要です。</string>
     <string name="model_storage_public_unsupported">Android 11 以降が必要です。</string>
-    <string name="model_storage_access_lost">「すべてのファイルへのアクセス」がオフになったため、Download フォルダのモデルを読み込めません。</string>
+    <string name="model_storage_access_lost">「すべてのファイルへのアクセス」がオフになったため、アプリのストレージ外のモデルを読み込めません。</string>
     <string name="model_storage_grant">アクセスを許可</string>
     <string name="model_storage_no_access">「すべてのファイルへのアクセス」が許可されませんでした</string>
     <string name="model_storage_busy">ダウンロードと生成が終わるまでお待ちください</string>
@@ -532,7 +532,22 @@
     <string name="model_storage_moved">モデルを移動しました</string>
     <string name="model_storage_move_failed">移動に失敗しました</string>
     <string name="model_storage_pending">%1$s への移動が完了していないため、一部のモデルがもう一方の場所に残っています。上で保存先を選ぶと、移動を完了するか元に戻せます。</string>
-    <string name="model_storage_name_clash">Download フォルダは大文字と小文字を区別しないため、次の名前が他のモデルや埋め込みを上書きしてしまいます: %1$s。先に名前を変更するか削除してください。</string>
+    <string name="model_storage_name_clash">この保存先は大文字と小文字を区別しないため、次の名前が他のモデルや埋め込みを上書きしてしまいます: %1$s。先に名前を変更するか削除してください。</string>
     <string name="model_storage_conflict">%1$s には既に %2$s があります。どちらかを削除してから、もう一度お試しください。</string>
     <string name="model_storage_moving_blocked">モデルを移動中です。移動が終わってからもう一度お試しください。</string>
+    <string name="model_storage_custom">カスタムフォルダ</string>
+    <string name="model_storage_custom_hint">デバイス上の任意のフォルダを選択できます。アプリはその中に models/ と embeddings/ を作成し、モデルを移動します。「すべてのファイルへのアクセス」が必要です。</string>
+    <string name="model_storage_custom_current">選択中: %1$s</string>
+    <string name="model_storage_custom_unusable">そのフォルダの場所を特定できませんでした。クラウドやドキュメントプロバイダーではなく、端末のストレージ内のフォルダを選択してください。</string>
+    <string name="model_storage_custom_public">ストレージのルートや Download、DCIM などの共有フォルダはモデルの保存先にできません。サブフォルダを選択または作成してください。</string>
+    <string name="model_storage_custom_read_only">そのフォルダには書き込めません。別のフォルダを選ぶか、新しいフォルダを作成してください。</string>
+    <string name="model_storage_custom_no_models">そのフォルダには別の内容があり、モデルは見つかりませんでした。空のフォルダか、すでにモデルが入っているフォルダを選択してください。</string>
+    <string name="model_storage_adopted">選択したフォルダ内のモデルを使用するよう切り替えました。</string>
+    <string name="model_storage_adopt_title">フォルダにすでにモデルがあります</string>
+    <string name="model_storage_adopt_or_merge">選択したフォルダにはすでにモデルがあり、アプリのストレージにもモデルがあります。このフォルダをそのまま使う（アプリ側のモデルはそのまま残ります）か、アプリ側のモデルをフォルダに移動するかを選べます。</string>
+    <string name="model_storage_adopt_use">このフォルダを使う</string>
+    <string name="model_storage_adopt_merge">アプリのモデルを移動</string>
+    <string name="model_storage_problem_title">モデルを読み込めません</string>
+    <string name="model_storage_unreachable">Local Dream は %1$s を開けないため、そこに保存したモデルが表示されません。フォルダが削除・名前変更されたか、アプリにその権限がなくなっています。</string>
+    <string name="model_storage_download_blocked">モデルはアプリのストレージ外に保存する前提ですが、そのフォルダを今開けません。ここでダウンロードするとアプリ内に別のコピーができるだけなので、まず設定でアクセスを戻してください。</string>
 </resources>
