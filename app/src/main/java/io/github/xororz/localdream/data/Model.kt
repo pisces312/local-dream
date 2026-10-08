@@ -756,8 +756,12 @@ class ModelRepository private constructor(private val context: Context) {
     private fun createQwenImage21Model(): Model {
         val id = "qwen_image_2_1"
         // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
-        // replaced it and nothing reads the old file, so reclaim its 4GB.
-        File(File(Model.getModelsDir(context), id), "dit.gguf").delete()
+        // replaced it and nothing reads the old file, so reclaim its 4GB —
+        // but only once the replacement is actually on disk. This runs on every
+        // list refresh, and the models folder may be one the user picked in
+        // Settings, where deleting his weights without asking is not ours to do.
+        val modelDir = File(Model.getModelsDir(context), id)
+        if (File(modelDir, "dit.safetensors").isFile) File(modelDir, "dit.gguf").delete()
         return Model(
             id = id,
             name = "Qwen Image 2.1",

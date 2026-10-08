@@ -91,9 +91,11 @@ object LegacyStoragePath {
         if (ModelStorage.location(context) != ModelStorage.Location.CUSTOM) return false
         // A move in flight owns both sides; it would race this and lose.
         if (ModelStorage.moveState.value is ModelStorage.MoveState.Moving) return false
-        // Listing the folder needs All files access; without it the models are
-        // simply not visible yet, and Settings offers the grant.
-        if (!ModelStorage.hasAllFilesAccess()) return false
+        // Not the All files access check: below Android 11 shared folders are
+        // reached through the legacy storage permission, and bailing there would
+        // leave the folder flat behind an empty models/ with nothing to say about
+        // it. isAccessLost is the API-aware form of "we may not read this yet".
+        if (ModelStorage.isAccessLost(context)) return false
         val root = ModelStorage.rootFor(context, ModelStorage.Location.CUSTOM)
         var changed = false
         val moved = relocateFlatRoot(root)
