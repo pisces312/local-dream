@@ -520,6 +520,8 @@ JDK 对被信号终止的进程返回 `128+signum`。
 2. **方案 C 落地**（`diffusion=disk`，一个字符串 + 重编 core，**不 bump ABI、不动 engine**）：
    现在它排在分块方案之前，因为机制已逐环核实且无画质风险。验收要点（第二条 release 行、
    解码前 `avail` 是否跳回约 8 G、每张多几秒）在 OOM 那篇的 §5 A。
+   ~~排期中~~ **2026-10-08 已由上游 `647dc6f` 落进代码并在 `feature/model-storage-upstream` 重编进包，
+   真机验收仍未做** —— 进展只记在 OOM 那篇的 §7 第 2 条，别在这里更新。
 3. **同一次重编顺手做**：1024² 纳入分块 + tile 降到 32、加 `--dit_vae_tile_size` /
    `--dit-vae-tile-above` / `--dit-threads` / `--dit_params_backend` CLI flag（§5.5）。
 4. **免费的线性旋钮**：步数降到 4/1（`README.md:252`）；腾常驻内存；两次运行之间等机身降温。
