@@ -1,5 +1,9 @@
 package io.github.xororz.localdream.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,13 +16,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,24 +41,34 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.NativeBuildInfo
 import io.github.xororz.localdream.data.Resolution
+import io.github.xororz.localdream.data.RuntimeManager
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The generation-parameter dialog opened from the prompt page. Pure UI: every
  * state mutation is routed back through callbacks so the screen keeps ownership
  * of parameter state and persistence.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun AdvancedSettingsDialog(
     isSdxl: Boolean,
@@ -88,6 +107,9 @@ internal fun AdvancedSettingsDialog(
     onShare: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
+    runtimeDir: String? = null,
+    availableRuntimes: List<io.github.xororz.localdream.data.RuntimeDir> = emptyList(),
+    onRuntimeDirChange: (String?) -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -486,6 +508,59 @@ internal fun AdvancedSettingsDialog(
                             )
                         }
                     }
+
+                    // Runtime selection for NPU models
+                    if (!runOnCpu && availableRuntimes.isNotEmpty()) {
+                        val runtimeExpanded = remember { mutableStateOf(false) }
+                        androidx.compose.material3.ExposedDropdownMenuBox(
+                            expanded = runtimeExpanded.value,
+                            onExpandedChange = { runtimeExpanded.value = it },
+                        ) {
+                            OutlinedTextField(
+                                value = runtimeDir ?: io.github.xororz.localdream.data.RuntimeManager.DEFAULT_SUBDIR,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.runtime_lib)) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = runtimeExpanded.value) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = runtimeExpanded.value,
+                                onDismissRequest = { runtimeExpanded.value = false },
+                            ) {
+                                availableRuntimes.forEach { rt ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(rt.name)
+                                                if (rt.soFiles.isNotEmpty()) {
+                                                    Text(
+                                                        rt.soFiles.joinToString(", "),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            onRuntimeDirChange(rt.name)
+                                            runtimeExpanded.value = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // What the shipped engine and core were built from, shown
+                    // under the picker that decides which runtime they load.
+                    if (!runOnCpu) {
+                        NativeBuildInfoCard(
+                            runtimeDirName = runtimeDir ?: RuntimeManager.DEFAULT_SUBDIR,
+                        )
+                    }
                 }
             }
         },
@@ -516,4 +591,143 @@ internal fun AdvancedSettingsDialog(
             }
         },
     )
+}
+
+/**
+ * What the shipped native libraries were built from, read back out of the files
+ * themselves rather than from anything loaded here: the core is spawned as an
+ * executable and the DiT engine is dlopen'ed by it, so neither is ever loaded
+ * by this process. The engine and the core come from separate build scripts,
+ * which is what the ABI line at the bottom is for -- rebuilding only one of
+ * them yields a pair that fails at dlopen time, and without this check that
+ * shows up as a generation dying with no explanation.
+ */
+@Composable
+private fun NativeBuildInfoCard(runtimeDirName: String) {
+    val context = LocalContext.current
+    val report by produceState<NativeBuildInfo.Report?>(initialValue = null, runtimeDirName) {
+        value = withContext(Dispatchers.IO) {
+            NativeBuildInfo.report(
+                context,
+                RuntimeManager.getRuntimeDir(context, runtimeDirName),
+            )
+        }
+    }
+    val current = report ?: return
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.build_info_title),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = { copyBuildInfo(context, current, runtimeDirName) },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = stringResource(R.string.build_info_copy),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        NativeLibrarySummary(current.engine)
+        NativeLibrarySummary(current.core)
+        Text(
+            text = abiSummary(current),
+            style = MaterialTheme.typography.bodySmall,
+            color = when (current.abiMatches) {
+                false -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
+/** Copies the same block the card shows, since a screenshot loses detail. */
+private fun copyBuildInfo(
+    context: Context,
+    report: NativeBuildInfo.Report,
+    runtimeDirName: String,
+) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    clipboard?.setPrimaryClip(
+        ClipData.newPlainText(
+            context.getString(R.string.build_info_title),
+            NativeBuildInfo.describe(report, runtimeDirName),
+        ),
+    )
+    Toast.makeText(context, R.string.build_info_copied, Toast.LENGTH_SHORT).show()
+}
+
+@Composable
+private fun NativeLibrarySummary(library: NativeBuildInfo.Library) {
+    if (!library.present) {
+        Text(
+            text = stringResource(R.string.build_info_missing, library.name),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+
+    val commit = library.commitShort
+    val commitText = when {
+        commit == null -> stringResource(R.string.build_info_unrecorded)
+        library.manifest?.dirty == true -> stringResource(R.string.build_info_commit_dirty, commit)
+        else -> stringResource(R.string.build_info_commit, commit)
+    }
+    val details = buildList {
+        library.manifest?.abiVersion?.let { add("ABI v$it") }
+        library.ndk?.let { add("NDK $it") }
+        library.toolchain.forEach { (key, value) -> add("$key $value") }
+    }
+    val buildId = library.buildId
+
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(
+            text = library.name,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(text = commitText, style = MaterialTheme.typography.bodySmall)
+        if (details.isNotEmpty()) {
+            Text(
+                text = details.joinToString("  ·  "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            text = buildId?.let { stringResource(R.string.build_info_build_id, it.take(16)) }
+                ?: stringResource(R.string.build_info_no_build_id),
+            style = MaterialTheme.typography.bodySmall,
+            color = when (library.matchesRecord) {
+                false -> MaterialTheme.colorScheme.error
+                true -> MaterialTheme.colorScheme.primary
+                null -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
+@Composable
+private fun abiSummary(report: NativeBuildInfo.Report): String = when (report.abiMatches) {
+    true -> stringResource(R.string.build_info_abi_ok, report.engineAbiVersion ?: 0)
+
+    false -> stringResource(
+        R.string.build_info_abi_mismatch,
+        report.engineAbiVersion ?: -1,
+        report.coreExpectedAbiVersion ?: -1,
+    )
+
+    null -> stringResource(R.string.build_info_abi_unknown)
 }

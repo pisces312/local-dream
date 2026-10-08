@@ -115,6 +115,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
@@ -124,6 +125,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -145,6 +147,7 @@ import io.github.xororz.localdream.data.HistoryItem
 import io.github.xororz.localdream.data.HistoryManager
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.data.ModelStorage
+import io.github.xororz.localdream.data.RuntimeManager
 import io.github.xororz.localdream.data.PatchScanner
 import io.github.xororz.localdream.data.RemoteRepository
 import io.github.xororz.localdream.data.Resolution
@@ -156,6 +159,7 @@ import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
+import io.github.xororz.localdream.ui.components.DebugLogDialog
 import io.github.xororz.localdream.ui.components.GenerationParamsDialog
 import io.github.xororz.localdream.ui.components.ImportParametersDialog
 import io.github.xororz.localdream.ui.components.OverlayIconButton
@@ -270,6 +274,7 @@ fun ModelRunScreen(
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var showOpenCLWarningDialog by remember { mutableStateOf(false) }
     var showInterruptDialog by remember { mutableStateOf(false) }
+    var showDebugLogDialog by remember { mutableStateOf(false) }
 
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var intermediateBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -355,6 +360,7 @@ fun ModelRunScreen(
     var batchCounts by remember { mutableIntStateOf(GenerationDefaults.GLOBAL.batchCounts) }
     var scheduler by remember { mutableStateOf(GenerationDefaults.GLOBAL.scheduler) }
     var aspectRatio by remember { mutableStateOf(GenerationDefaults.GLOBAL.aspectRatio) }
+    var runtimeDir by remember { mutableStateOf<String?>(null) }
     var showCustomAspectRatioDialog by remember { mutableStateOf(false) }
     var currentBatchIndex by remember { mutableIntStateOf(0) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -638,6 +644,7 @@ fun ModelRunScreen(
                 batchCounts = batchCounts,
                 scheduler = scheduler,
                 aspectRatio = aspectRatio,
+                runtimeDir = runtimeDir,
             )
         }
     }
@@ -991,6 +998,7 @@ fun ModelRunScreen(
             denoiseStrength = ultrafixDenoiseStrength,
             useOpenCL = false,
             scheduler = scheduler,
+            runtimeDir = runtimeDir,
         )
         batchGenerationJob = coroutineScope.launch {
             // The progress card lives on the prompt page; bring it into view.
@@ -1362,13 +1370,18 @@ fun ModelRunScreen(
 
     DisposableEffect(modelId) {
         val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        val captureEnabled = prefs.getBoolean("enable_log_capture", false)
+        // Debug builds always write the log file + memory sampler; the modal that
+        // pops on leaving the screen stays behind the explicit setting.
+        val publishEnabled = prefs.getBoolean("enable_log_capture", false)
+        val captureEnabled = BuildConfig.DEBUG || publishEnabled
         if (captureEnabled) {
-            LogCapture.start()
+            LogCapture.start(context)
         }
         onDispose {
-            if (captureEnabled) {
-                LogCapture.stopAndPublish()
+            when {
+                !captureEnabled -> Unit
+                publishEnabled -> LogCapture.stopAndPublish()
+                else -> LogCapture.stop()
             }
             // Safety net for paths that bypass handleExit() (e.g. predictive back
             // popping the destination while not running).
@@ -1413,6 +1426,7 @@ fun ModelRunScreen(
             useOpenCL = prefs.useOpenCL
             batchCounts = prefs.batchCounts
             scheduler = if (isFirstRun) defaults.scheduler else prefs.scheduler
+            runtimeDir = prefs.runtimeDir
             // Without img2img the backend has no VAE encoder, so a stored
             // non-1:1 ratio would silently fall back to 1024x1024 anyway.
             aspectRatio = if (useImg2img) prefs.aspectRatio else "1:1"
@@ -1490,6 +1504,7 @@ fun ModelRunScreen(
                     putExtra("width", currentWidth)
                     putExtra("height", currentHeight)
                     putExtra("use_opencl", useOpenCL)
+                    putExtra("runtimeDirName", runtimeDir)
                 }
                 context.startForegroundService(intent)
             }
@@ -1603,6 +1618,7 @@ fun ModelRunScreen(
                         useOpenCL = generationParamsTmp.useOpenCL,
                         scheduler = generationParamsTmp.scheduler,
                         mode = currentGenerationMode,
+                        runtimeDir = generationParamsTmp.runtimeDir,
                     )
 
                     // Save to disk and update history list. The saved item's id is
@@ -1681,12 +1697,19 @@ fun ModelRunScreen(
         }
     }
 
-    // Only intercept back while a generation is running: back then offers to
-    // interrupt the generation and stays on the screen (a second back exits).
-    // In idle state the predictive back gesture can show NavHost's peek of
-    // the previous destination.
-    if (isRunning) {
-        BackHandler { showInterruptDialog = true }
+    // Intercept back when running (interrupt dialog) or on result/history
+    // pages (scroll back to prompt page). On the prompt page with no
+    // generation running, let the system handle back → pop to model list.
+    BackHandler(enabled = isRunning || pagerState.currentPage != 0) {
+        if (isRunning) {
+            showInterruptDialog = true
+        } else {
+            coroutineScope.launch { pagerState.animateScrollToPage(0) }
+        }
+    }
+
+    if (showDebugLogDialog) {
+        DebugLogDialog(onDismiss = { showDebugLogDialog = false })
     }
 
     if (showInterruptDialog) {
@@ -2039,6 +2062,12 @@ fun ModelRunScreen(
                                 }
                             }
                             if (showAdvancedSettings) {
+                                var availableRuntimes by remember {
+                                    mutableStateOf(RuntimeManager.listAvailableRuntimes(context))
+                                }
+                                LaunchedEffect(Unit) {
+                                    availableRuntimes = RuntimeManager.listAvailableRuntimes(context)
+                                }
                                 AdvancedSettingsDialog(
                                     isSdxl = model?.usesFixedCanvas == true,
                                     isDit = model?.isDit == true,
@@ -2059,6 +2088,12 @@ fun ModelRunScreen(
                                     denoiseStrength = denoiseStrength,
                                     seed = seed,
                                     returnedSeed = returnedSeed,
+                                    runtimeDir = runtimeDir,
+                                    availableRuntimes = availableRuntimes,
+                                    onRuntimeDirChange = { value ->
+                                        runtimeDir = value
+                                        saveAllFields()
+                                    },
                                     onAspectRatioSelected = { ratio ->
                                         if (!isRunning && aspectRatio != ratio) {
                                             aspectRatio = ratio
@@ -2148,6 +2183,7 @@ fun ModelRunScreen(
                                             useOpenCL = useOpenCL,
                                             scheduler = scheduler,
                                             mode = currentMode,
+                                            runtimeDir = runtimeDir,
                                         )
                                         shareSourceModelId = modelId
                                     },
@@ -2206,6 +2242,7 @@ fun ModelRunScreen(
                                     denoiseStrength = denoiseStrength,
                                     useOpenCL = useOpenCL,
                                     scheduler = scheduler,
+                                    runtimeDir = runtimeDir,
                                 )
 
                                 Log.d(
@@ -2259,6 +2296,7 @@ fun ModelRunScreen(
                                             denoiseStrength = denoiseStrength,
                                             useOpenCL = useOpenCL,
                                             scheduler = scheduler,
+                                            runtimeDir = runtimeDir,
                                         )
 
                                         val batchIntent = Intent(
@@ -2462,6 +2500,20 @@ fun ModelRunScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (BuildConfig.DEBUG) {
+                            Text(
+                                text = LogCapture.memStatus.value.ifBlank { "sampling…" },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.extraSmall)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .clickable { showDebugLogDialog = true }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
                         intermediateBitmap?.let { bitmap ->
                             Spacer(modifier = Modifier.height(8.dp))
                             Card(
@@ -2803,6 +2855,8 @@ fun ModelRunScreen(
                         IconButton(onClick = {
                             if (isRunning) {
                                 showInterruptDialog = true
+                            } else if (pagerState.currentPage != 0) {
+                                coroutineScope.launch { pagerState.animateScrollToPage(0) }
                             } else {
                                 handleExit()
                             }
