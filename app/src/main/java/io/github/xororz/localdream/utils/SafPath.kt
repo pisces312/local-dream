@@ -38,28 +38,45 @@ internal fun resolveFsPathFromUri(context: Context, uri: Uri): String? {
 }
 
 /**
- * Whether [dir] can hold the model storage root: models, embeddings and the
- * download scratch get created and deleted inside it, so it must be a writable
- * folder the app owns — never the volume root or one of Android's shared
- * collections, whose contents belong to the user and to other apps.
+ * Why [dir] cannot be the custom model storage root, or null when it can.
+ * Models, embeddings and the download scratch get created and deleted inside
+ * it, so it must be a writable folder the app owns — never the volume root or
+ * one of Android's shared collections, whose contents belong to the user and
+ * to other apps.
  *
  * Accepts a fresh (or empty) folder, one that already has the app layout
- * (`models/` beside `embeddings/`), and a folder holding only model directories
- * in the pre-layout shape the fork used to write — that last case is what lets
- * an existing custom directory keep working without moving anything.
+ * (`models/` beside `embeddings/`), and any folder holding at least one model
+ * directory — that last case is what lets an existing custom directory keep
+ * working without moving anything. Unknown entries beside the models are
+ * simply left alone: TempCleaner only sweeps the models dir in app storage,
+ * so nothing here is ever deleted.
  */
-internal fun isUsableCustomRoot(dir: File): Boolean {
-    val root = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
-    val normalized = dir.absolutePath.trimEnd('/')
-    if (normalized == root) return false
-    if (normalized.removePrefix("$root/") in PUBLIC_TOP_DIRS) return false
-    if (!dir.isDirectory && !dir.mkdirs()) return false
-    if (!dir.canWrite()) return false
+internal enum class CustomRootProblem { VOLUME_ROOT, PUBLIC_DIR, NOT_WRITABLE, NO_MODELS }
 
-    val entries = dir.listFiles().orEmpty()
-    if (File(dir, "models").isDirectory) return true
-    return entries.all { it.isDirectory && (it.containsModelMarker() || it.name in APP_MANAGED_NAMES) }
+internal fun customRootProblem(dir: File): CustomRootProblem? =
+    customRootProblem(dir, Environment.getExternalStorageDirectory().absolutePath)
+
+// Split from the Android entry point so the JVM test can name its own
+// volume root.
+internal fun customRootProblem(dir: File, externalRoot: String): CustomRootProblem? {
+    val root = externalRoot.trimEnd('/')
+    val normalized = dir.absolutePath.trimEnd('/')
+    if (normalized == root) return CustomRootProblem.VOLUME_ROOT
+    // File.separator agnostic so the JVM test can drive this on Windows.
+    val relative = normalized.removePrefix(root).trimStart('/', '\\')
+    if (relative in PUBLIC_TOP_DIRS) return CustomRootProblem.PUBLIC_DIR
+    if (!dir.isDirectory && !dir.mkdirs()) return CustomRootProblem.NOT_WRITABLE
+    if (!dir.canWrite()) return CustomRootProblem.NOT_WRITABLE
+
+    // Scratch the app leaves at the root does not make a folder "used".
+    val significant = dir.listFiles().orEmpty().filter { it.name !in APP_MANAGED_NAMES }
+    if (significant.isEmpty()) return null
+    if (File(dir, "models").isDirectory) return null
+    if (significant.any { it.isDirectory && it.containsModelMarker() }) return null
+    return CustomRootProblem.NO_MODELS
 }
+
+internal fun isUsableCustomRoot(dir: File): Boolean = customRootProblem(dir) == null
 
 /** A folder the app manages: it carries at least one model marker file. */
 internal fun File.containsModelMarker(): Boolean =
@@ -73,5 +90,6 @@ private val PUBLIC_TOP_DIRS = setOf(
     "Alarms", "Notifications", "Ringtones", "Podcasts",
 )
 
-// Files the app itself leaves at the root.
-private val APP_MANAGED_NAMES = setOf("embeddings", "temp_downloads", ".nomedia")
+// Files the app itself leaves at the root. `.tmp_downloads` is the scratch
+// dir the fork's older versions wrote beside the models.
+private val APP_MANAGED_NAMES = setOf("embeddings", "temp_downloads", ".tmp_downloads", ".nomedia")

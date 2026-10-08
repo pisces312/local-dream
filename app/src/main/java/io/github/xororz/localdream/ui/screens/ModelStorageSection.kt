@@ -45,7 +45,8 @@ import io.github.xororz.localdream.data.ModelStorage.Location
 import io.github.xororz.localdream.data.ModelStorage.MoveState
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
-import io.github.xororz.localdream.utils.isUsableCustomRoot
+import io.github.xororz.localdream.utils.CustomRootProblem
+import io.github.xororz.localdream.utils.customRootProblem
 import io.github.xororz.localdream.utils.resolveFsPathFromUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -80,6 +81,9 @@ internal fun ModelStorageSection() {
     val msgBusy = stringResource(R.string.model_storage_busy)
     val msgNoAccess = stringResource(R.string.model_storage_no_access)
     val msgCustomUnusable = stringResource(R.string.model_storage_custom_unusable)
+    val msgCustomPublic = stringResource(R.string.model_storage_custom_public)
+    val msgCustomReadOnly = stringResource(R.string.model_storage_custom_read_only)
+    val msgCustomNoModels = stringResource(R.string.model_storage_custom_no_models)
 
     val customPath = remember(revision, moveState) { ModelStorage.customPath(context) }
 
@@ -104,17 +108,22 @@ internal fun ModelStorageSection() {
                 // granted (checking it needs that very permission), so this
                 // is where its usability is decided. A folder that fails
                 // restores the one it replaced.
-                val usable = withContext(Dispatchers.IO) {
-                    isUsableCustomRoot(ModelStorage.rootFor(context, Location.CUSTOM))
+                val problem = withContext(Dispatchers.IO) {
+                    customRootProblem(ModelStorage.rootFor(context, Location.CUSTOM))
                 }
-                if (!usable) {
+                if (problem != null) {
                     if (hasCustomPathBackup) {
                         ModelStorage.setCustomRoot(context, customPathBackup)
                         hasCustomPathBackup = false
                         customPathBackup = null
                     }
                     revision++
-                    Toast.makeText(context, msgCustomUnusable, Toast.LENGTH_LONG).show()
+                    val message = when (problem) {
+                        CustomRootProblem.VOLUME_ROOT, CustomRootProblem.PUBLIC_DIR -> msgCustomPublic
+                        CustomRootProblem.NOT_WRITABLE -> msgCustomReadOnly
+                        CustomRootProblem.NO_MODELS -> msgCustomNoModels
+                    }
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                     return@launch
                 }
                 hasCustomPathBackup = false

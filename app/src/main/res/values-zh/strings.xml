@@ -544,7 +544,10 @@
     <string name="model_storage_custom">自定义文件夹</string>
     <string name="model_storage_custom_hint">选择设备上的任意文件夹。应用会在其中创建 models/ 和 embeddings/，并把模型移过去。需要“所有文件访问权限”。</string>
     <string name="model_storage_custom_current">已选择：%1$s</string>
-    <string name="model_storage_custom_unusable">该文件夹不适合存放模型。请选择空文件夹，或应用在其中创建的文件夹。</string>
+    <string name="model_storage_custom_unusable">无法确定该文件夹的位置。请选择设备存储中的文件夹，而不是云盘或文档提供器。</string>
+    <string name="model_storage_custom_public">存储根目录和 Download、DCIM 等共享文件夹不能存放模型。请选择或新建一个子文件夹。</string>
+    <string name="model_storage_custom_read_only">该文件夹不可写。请换一个，或新建文件夹。</string>
+    <string name="model_storage_custom_no_models">该文件夹中有其他内容，且没有可识别的模型。请选择空文件夹，或已存放模型的文件夹。</string>
     <string name="model_storage_problem_title">无法读取模型</string>
     <string name="model_storage_unreachable">Local Dream 无法打开 %1$s，存放在其中的模型不会显示。该文件夹可能已被删除或改名，也可能是应用失去了访问它的权限。</string>
     <string name="model_storage_download_blocked">模型本应存放在应用存储之外，而该目录当前无法打开。此时下载会在应用内另存一份副本，请先在设置中恢复访问。</string>
