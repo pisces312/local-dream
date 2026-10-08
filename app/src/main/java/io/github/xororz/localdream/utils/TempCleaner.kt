@@ -31,8 +31,8 @@ import kotlinx.coroutines.withContext
  * an active transfer (a model dir being populated by a rename), and while a
  * move between storage locations runs or is unfinished, since a half-moved
  * model looks just like a half-extracted one. The models sweep covers app
- * storage only: in the public Download/LocalDream folder an unrecognized dir
- * may belong to the person or to another app.
+ * storage only: in a shared folder (Download/LocalDream or a custom one) an
+ * unrecognized dir may belong to the person or to another app.
  */
 object TempCleaner {
     private const val TAG = "TempCleaner"

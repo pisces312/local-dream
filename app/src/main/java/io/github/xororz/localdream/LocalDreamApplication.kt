@@ -1,7 +1,9 @@
 package io.github.xororz.localdream
 
 import android.app.Application
+import android.util.Log
 import io.github.xororz.localdream.data.HistoryMigration
+import io.github.xororz.localdream.data.LegacyStoragePath
 import io.github.xororz.localdream.data.RuntimeManager
 import io.github.xororz.localdream.data.MigrationState
 import io.github.xororz.localdream.data.db.AppDatabase
@@ -16,6 +18,10 @@ import kotlinx.coroutines.launch
 
 class LocalDreamApplication : Application() {
 
+    private companion object {
+        const val TAG = "LocalDreamApplication"
+    }
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _migrationState = MutableStateFlow<MigrationState>(MigrationState.Idle)
@@ -23,8 +29,21 @@ class LocalDreamApplication : Application() {
 
     private var migrationJob: Job? = null
 
+    // The retired custom-folder setting has to be applied before anything reads
+    // the models dir, or the first model list is built from the wrong root.
+    // ModelRepository waits on this job instead of racing it.
+    private var storageAdoptionJob: Job? = null
+
+    suspend fun awaitStorageAdoption() {
+        storageAdoptionJob?.join()
+    }
+
     override fun onCreate() {
         super.onCreate()
+        storageAdoptionJob = appScope.launch {
+            runCatching { LegacyStoragePath.adopt(this@LocalDreamApplication) }
+                .onFailure { Log.w(TAG, "could not adopt the custom folder", it) }
+        }
         appScope.launch { RuntimeManager.ensureDefaultRuntime(this@LocalDreamApplication) }
         startMigration()
     }

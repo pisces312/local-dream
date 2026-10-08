@@ -57,11 +57,11 @@ internal fun isUsableCustomRoot(dir: File): Boolean {
 
     val entries = dir.listFiles().orEmpty()
     if (File(dir, "models").isDirectory) return true
-    return entries.all { it.isDirectory && (it.isModelDir() || it.name in APP_MANAGED_NAMES) }
+    return entries.all { it.isDirectory && (it.containsModelMarker() || it.name in APP_MANAGED_NAMES) }
 }
 
 /** A folder the app manages: it carries at least one model marker file. */
-private fun File.isModelDir(): Boolean =
+internal fun File.containsModelMarker(): Boolean =
     File(this, Model.COMPLETE_MARKER).exists() ||
         Model.CUSTOM_MODEL_MARKERS.any { marker -> File(this, marker).exists() }
 

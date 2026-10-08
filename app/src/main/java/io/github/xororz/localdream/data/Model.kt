@@ -9,6 +9,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.xororz.localdream.LocalDreamApplication
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.service.ModelDownloadService
 import java.io.File
@@ -1119,6 +1120,8 @@ class ModelRepository private constructor(private val context: Context) {
 
     suspend fun refreshAllModels() {
         refreshMutex.withLock {
+            // Where the models live is decided before this scans anything else.
+            (context.applicationContext as? LocalDreamApplication)?.awaitStorageAdoption()
             baseUrl = generationPreferences.getBaseUrl()
             models = withContext(Dispatchers.IO) {
                 // Stamp dirs written before COMPLETE_MARKER existed, or the
