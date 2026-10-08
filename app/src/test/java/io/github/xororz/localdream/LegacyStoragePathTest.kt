@@ -164,6 +164,26 @@ class LegacyStoragePathTest {
     }
 
     @Test
+    fun skipsOnlyTheNamesTheRootAlreadyHas() {
+        // A duplicate name is not a reason to strand everything else: the
+        // root copy wins for that name, both copies stay, the rest moves.
+        val appStorage = tmp.newFolder("filesDir7")
+        val root = tmp.newFolder("sdcard_models7")
+        write(File(appStorage, "embeddings/dup.safetensors"), "app copy")
+        write(File(appStorage, "embeddings/fresh.safetensors"), "fresh bytes")
+        write(File(root, "embeddings/dup.safetensors"), "root copy")
+
+        assertTrue(LegacyStoragePath.seedEmbeddings(
+            File(appStorage, "embeddings"), File(root, "embeddings"), journal))
+
+        assertTrue(File(root, "embeddings/fresh.safetensors").isFile)
+        assertEquals("root copy", File(root, "embeddings/dup.safetensors").readText())
+        assertEquals("app copy", File(appStorage, "embeddings/dup.safetensors").readText())
+        // Left behind by the skipped copy, so it must not be removed.
+        assertTrue(File(appStorage, "embeddings").isDirectory)
+    }
+
+    @Test
     fun addsAppEmbeddingsThatTheRootDoesNotHaveYet() {
         // Two different embeddings is not a conflict: both belong in the folder
         // the backend reads, whichever side each of them came from.

@@ -5,6 +5,7 @@ import android.util.Log
 import io.github.xororz.localdream.utils.containsModelMarker
 import io.github.xororz.localdream.utils.isUsableCustomRoot
 import java.io.File
+import java.io.IOException
 
 /**
  * One-time bridge from the fork's older custom-directory setting to
@@ -162,19 +163,30 @@ object LegacyStoragePath {
      * Uses the same tree mover as a location change, so a file reaches its
      * final name only after it is fully on disk and the app-side copy goes last.
      *
-     * Bails when both sides hold a file of the same name: deciding which of two
-     * `inv.safetensors` wins is not this function's call, and an ambiguous merge
-     * would silently drop one of them. Anything else moves, so a root that
-     * already has other embeddings still picks up the app-side ones, and a copy
-     * interrupted half way finishes on the next call. Returns whether it moved
-     * something — kept free of android.util.Log so the JVM test can drive it.
+     * A name both sides hold is skipped file by file rather than stranding
+     * everything: deciding which of two `inv.safetensors` wins is not this
+     * function's call, so the root copy stays and the app copy keeps its own —
+     * but every other file still moves, so a root that already has some
+     * embeddings picks up the rest, and a copy interrupted half way finishes
+     * on the next call (the pair the journal names is handed to the mover,
+     * which completes it). Returns whether it moved something — kept free of
+     * android.util.Log so the JVM test can drive it.
      */
     internal fun seedEmbeddings(source: File, destination: File, journal: ModelStorage.MoveJournal): Boolean {
-        val names = source.listFiles()?.filter { it.isFile }?.map { it.name }?.toSet().orEmpty()
-        if (names.isEmpty()) return false
-        val alreadyThere = destination.listFiles().orEmpty().filter { it.isFile }.map { it.name }.toSet()
-        if (names.any { it in alreadyThere }) return false
-        ModelStorage.moveTree(source, destination, journal) { }
-        return true
+        val files = source.listFiles()?.filter { it.isFile }.orEmpty()
+        if (files.isEmpty()) return false
+        if (!destination.isDirectory && !destination.mkdirs()) {
+            throw IOException("cannot create ${destination.path}")
+        }
+        var moved = false
+        for (src in files) {
+            val dst = File(destination, src.name)
+            if (dst.exists() && !journal.names(src, dst)) continue
+            ModelStorage.moveTree(src, dst, journal) { }
+            moved = true
+        }
+        // Gone once every file has left it; kept while skipped copies remain.
+        if (moved && source.listFiles().orEmpty().isEmpty()) source.delete()
+        return moved
     }
 }
