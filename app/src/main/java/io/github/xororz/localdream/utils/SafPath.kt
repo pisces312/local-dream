@@ -27,12 +27,13 @@ internal fun resolveFsPathFromUri(context: Context, uri: Uri): String? {
             "home" -> Environment.getExternalStorageDirectory().absolutePath
             else -> "/storage/$volume"
         }
-        val fsPath = File(basePath, relative)
-        if (fsPath.exists() || fsPath.mkdirs()) {
-            return fsPath.absolutePath
-        }
+        // Deliberately no exists()/mkdirs() probe: without All files access a
+        // shared folder answers false to both, which would read as "cannot
+        // resolve" before the permission request that follows ever runs. The
+        // path construction above is deterministic; whether the folder is
+        // usable is checked after access is granted.
+        return File(basePath, relative).absolutePath
     }
-    // Fallback: try to resolve via canonical path
     return null
 }
 

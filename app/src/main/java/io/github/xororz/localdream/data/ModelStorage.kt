@@ -132,12 +132,15 @@ object ModelStorage {
     }
 
     /**
-     * Records [path] as the root of [Location.CUSTOM] without switching to it.
-     * A move sets the location once the files are there; picking a folder that
-     * already holds the models (the legacy custom path) uses [selectInPlace].
+     * Records [path] as the root of [Location.CUSTOM] without switching to it;
+     * null forgets the folder. A move sets the location once the files are
+     * there; picking a folder that already holds the models (the legacy
+     * custom path) uses [selectInPlace].
      */
-    fun setCustomRoot(context: Context, path: String) {
-        prefs(context).edit(commit = true) { putString(KEY_CUSTOM_PATH, path) }
+    fun setCustomRoot(context: Context, path: String?) {
+        prefs(context).edit(commit = true) {
+            if (path == null) remove(KEY_CUSTOM_PATH) else putString(KEY_CUSTOM_PATH, path)
+        }
     }
 
     /** Switches to [location] without moving anything: the files are already there. */

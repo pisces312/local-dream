@@ -47,7 +47,6 @@ import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
 import io.github.xororz.localdream.utils.isUsableCustomRoot
 import io.github.xororz.localdream.utils.resolveFsPathFromUri
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,6 +72,10 @@ internal fun ModelStorageSection() {
     var confirmTarget by remember { mutableStateOf<Location?>(null) }
     var confirmBytes by remember { mutableStateOf(0L) }
     var awaitingAccessFor by remember { mutableStateOf<Location?>(null) }
+    // The folder a pick replaced, kept so a folder that fails the usability
+    // check restores it instead of clobbering a working setup.
+    var customPathBackup by remember { mutableStateOf<String?>(null) }
+    var hasCustomPathBackup by remember { mutableStateOf(false) }
 
     val msgBusy = stringResource(R.string.model_storage_busy)
     val msgNoAccess = stringResource(R.string.model_storage_no_access)
@@ -96,6 +99,27 @@ internal fun ModelStorageSection() {
 
     fun askToMove(target: Location) {
         scope.launch {
+            if (target == Location.CUSTOM) {
+                // The picked folder was recorded before All files access was
+                // granted (checking it needs that very permission), so this
+                // is where its usability is decided. A folder that fails
+                // restores the one it replaced.
+                val usable = withContext(Dispatchers.IO) {
+                    isUsableCustomRoot(ModelStorage.rootFor(context, Location.CUSTOM))
+                }
+                if (!usable) {
+                    if (hasCustomPathBackup) {
+                        ModelStorage.setCustomRoot(context, customPathBackup)
+                        hasCustomPathBackup = false
+                        customPathBackup = null
+                    }
+                    revision++
+                    Toast.makeText(context, msgCustomUnusable, Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                hasCustomPathBackup = false
+                customPathBackup = null
+            }
             val bytes = withContext(Dispatchers.IO) {
                 // The move starts from wherever the models are right now.
                 ModelStorage.sizeAt(context, ModelStorage.location(context))
@@ -156,8 +180,8 @@ internal fun ModelStorageSection() {
     ) { uri ->
         revision++
         if (uri == null) return@rememberLauncherForActivityResult
-        val dir = resolveFsPathFromUri(context, uri)?.let(::File)
-        if (dir == null || !isUsableCustomRoot(dir)) {
+        val path = resolveFsPathFromUri(context, uri)
+        if (path == null) {
             Toast.makeText(context, msgCustomUnusable, Toast.LENGTH_LONG).show()
             return@rememberLauncherForActivityResult
         }
@@ -165,7 +189,13 @@ internal fun ModelStorageSection() {
             Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
             return@rememberLauncherForActivityResult
         }
-        ModelStorage.setCustomRoot(context, dir.absolutePath)
+        // Recorded before the access grant, not after: validating the folder
+        // needs the very permission choose() may be about to request, so the
+        // check runs in askToMove() once access is settled. A rejected folder
+        // restores this backup.
+        hasCustomPathBackup = true
+        customPathBackup = ModelStorage.customPath(context)
+        ModelStorage.setCustomRoot(context, path)
         choose(Location.CUSTOM)
     }
 
