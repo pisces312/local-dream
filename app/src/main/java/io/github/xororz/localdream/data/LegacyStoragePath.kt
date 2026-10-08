@@ -19,17 +19,27 @@ import java.io.File
  * it finishes in milliseconds however many gigabytes are in there. Nothing has
  * to be moved by hand, and nothing leaves the device.
  *
- * Textual inversions are the one thing that does not follow the models: they
- * stayed in app storage even with a custom models path before, and they stay
- * there now. Re-importing them from Settings is enough if they are needed.
+ * Textual inversions never followed the old custom folder (they stayed in app
+ * storage even when the models did not), and the backend only reads them from
+ * beside the models — so adopting a folder would otherwise strand every
+ * embedding the user had imported: invisible in Settings, and ignored at
+ * generation time because the native side looks two levels above `--model_dir`.
+ * [seedEmbeddings] moves them into the root once, with the same tree mover a
+ * real location change uses.
  */
 object LegacyStoragePath {
     private const val TAG = "LegacyStoragePath"
 
     private const val MODELS_DIR = "models"
+    private const val EMBEDDINGS_DIR = "embeddings"
+
+    // Not ModelStorage's own journal: that one names the single file an
+    // interrupted move may have left on both sides, and this step must never
+    // rewrite it.
+    private const val JOURNAL = "legacy_storage_journal"
 
     // Names this app writes at the root itself; anything else belongs under models/.
-    private val ROOT_OWN_NAMES = setOf(MODELS_DIR, "embeddings", "temp_downloads", ".nomedia")
+    private val ROOT_OWN_NAMES = setOf(MODELS_DIR, EMBEDDINGS_DIR, "temp_downloads", ".nomedia")
 
     /**
      * Reads the retired preference once and, if it named a folder, points
@@ -72,19 +82,39 @@ object LegacyStoragePath {
 
     /**
      * Renames a flat (pre-layout) custom folder down into `models/` so its
-     * layout matches the other locations. Detected from the filesystem, so it
-     * is safe to call on every resume and does nothing once the folder is
-     * already laid out. Returns whether files moved.
+     * layout matches the other locations, and moves app-storage embeddings
+     * beside it. Detected from the filesystem, so it is safe to call on every
+     * resume and does nothing once the folder is already laid out. Returns
+     * whether anything moved.
      */
     fun relocateIfNeeded(context: Context): Boolean {
         if (ModelStorage.location(context) != ModelStorage.Location.CUSTOM) return false
+        // A move in flight owns both sides; it would race this and lose.
+        if (ModelStorage.moveState.value is ModelStorage.MoveState.Moving) return false
         // Listing the folder needs All files access; without it the models are
         // simply not visible yet, and Settings offers the grant.
         if (!ModelStorage.hasAllFilesAccess()) return false
         val root = ModelStorage.rootFor(context, ModelStorage.Location.CUSTOM)
+        var changed = false
         val moved = relocateFlatRoot(root)
-        if (moved > 0) Log.i(TAG, "relocated $moved entries of ${root.path} into $MODELS_DIR/")
-        return moved > 0
+        if (moved > 0) {
+            Log.i(TAG, "relocated $moved entries of ${root.path} into $MODELS_DIR/")
+            changed = true
+        }
+        // Its own journal file: an interrupted move keeps a record in
+        // ModelStorage's, and this step must never overwrite it.
+        val journal = ModelStorage.MoveJournal(File(context.noBackupFilesDir, JOURNAL))
+        val source = File(context.filesDir, EMBEDDINGS_DIR)
+        val seeded = runCatching { seedEmbeddings(source, File(root, EMBEDDINGS_DIR), journal) }
+        if (seeded.getOrDefault(false)) {
+            Log.i(TAG, "moved app embeddings into ${root.path}/$EMBEDDINGS_DIR")
+            changed = true
+        }
+        // A failed seed only means app storage keeps a copy it can no longer
+        // serve; the models themselves are unaffected, so say so and move on.
+        seeded.exceptionOrNull()?.let { Log.w(TAG, "embeddings could not be moved", it) }
+        journal.clear()
+        return changed
     }
 
     /**
@@ -107,5 +137,27 @@ object LegacyStoragePath {
         }
         if (moved == 0) models.delete()
         return moved
+    }
+
+    /**
+     * `filesDir/embeddings` -> `root/embeddings`, the one part of the adoption
+     * that really copies (app storage and shared storage are different mounts).
+     * Uses the same tree mover as a location change, so a file reaches its
+     * final name only after it is fully on disk and the app-side copy goes last.
+     *
+     * Bails when both sides hold a file of the same name: deciding which of two
+     * `inv.safetensors` wins is not this function's call, and an ambiguous merge
+     * would silently drop one of them. Anything else moves, so a root that
+     * already has other embeddings still picks up the app-side ones, and a copy
+     * interrupted half way finishes on the next call. Returns whether it moved
+     * something — kept free of android.util.Log so the JVM test can drive it.
+     */
+    internal fun seedEmbeddings(source: File, destination: File, journal: ModelStorage.MoveJournal): Boolean {
+        val names = source.listFiles()?.filter { it.isFile }?.map { it.name }?.toSet().orEmpty()
+        if (names.isEmpty()) return false
+        val alreadyThere = destination.listFiles().orEmpty().filter { it.isFile }.map { it.name }.toSet()
+        if (names.any { it in alreadyThere }) return false
+        ModelStorage.moveTree(source, destination, journal) { }
+        return true
     }
 }
