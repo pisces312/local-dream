@@ -19,7 +19,7 @@ app/src/main/
 
 | 项目 | 路径 |
 |---|---|
-| QAIRT SDK | `D:/dev/qairt/2.50.0.260828` |
+| QAIRT SDK | `D:/dev/qairt/2.51.0.260929`（v3.0.0-alpha.6 起；V85 支持需要它） |
 | Android NDK | `D:/dev/android_sdk/ndk/28.2.13676358` |
 | Android SDK | `D:/dev/android_sdk`（`ANDROID_HOME`） |
 | CMake | `D:/dev/android_sdk/cmake/3.22.1/bin/cmake.exe` |
@@ -28,7 +28,7 @@ app/src/main/
 | Git / Git Bash | `D:/dev/git`（bash: `D:/dev/git/bin/bash.exe`） |
 | Python | `D:/dev/miniconda3/python.exe` |
 | Rust | `D:/dev/rust` (1.96.0, target: aarch64-linux-android) |
-| DiT 构建 | WSL2 + Hexagon SDK `~/hexagon-sdk-v6.6.0.0` + NDK r29 |
+| DiT 构建 | WSL2 + Hexagon SDK 6.7（v85 skel 必需，6.6 编不出）+ NDK r29 |
 
 ## 构建
 
@@ -104,7 +104,7 @@ WSL 里没有 `cygpath`，且 `zipalign` 是 Windows PE，**不要**在 WSL 执�
 #   详见 docs/2026-09-19-dit-engine-build.md 踩坑记录第 7 条。
 rebuild-native.bat    # Windows CMD, 或手动:
 export ANDROID_NDK_ROOT=D:/dev/android_sdk/ndk/28.2.13676358
-export QAIRT_PATH=D:/dev/qairt/2.50.0.260828
+export QAIRT_PATH=D:/dev/qairt/2.51.0.260929
 cd app/src/main/cpp
 D:/dev/android_sdk/cmake/3.22.1/bin/cmake.exe --preset android-release \
     -DCMAKE_C_COMPILER_LAUNCHER="" \
