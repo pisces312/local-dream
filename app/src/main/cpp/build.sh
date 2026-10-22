@@ -10,9 +10,9 @@ cmake --build --preset android-release
 mkdir -p ../assets/qnnlibs ../jniLibs/arm64-v8a
 cp build/android/qnnlibs/*.so ../assets/qnnlibs/
 cp build/android/bin/arm64-v8a/libstable_diffusion_core.so ../jniLibs/arm64-v8a/
-mkdir -p ../assets/licenses/qnn-2.50.0.260828
-cp build/android/qnn-notices/* ../assets/licenses/qnn-2.50.0.260828/
-(cd ../assets/qnnlibs && sha256sum *.so) > ../assets/licenses/qnn-2.50.0.260828/SHA256SUMS
+mkdir -p ../assets/licenses/qnn-2.51.0.260929
+cp build/android/qnn-notices/* ../assets/licenses/qnn-2.51.0.260929/
+(cd ../assets/qnnlibs && sha256sum *.so) > ../assets/licenses/qnn-2.51.0.260929/SHA256SUMS
 
 # Record what produced the core. The app spawns it as an executable rather than
 # loading it, so the manifest -- not the library -- is where the commit, the

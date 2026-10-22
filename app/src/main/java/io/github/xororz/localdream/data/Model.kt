@@ -89,6 +89,8 @@ val chipsetModelSuffixes = mapOf(
     "SM8850P" to "8gen2",
     "SM8735" to "8gen2",
     "SM8845" to "8gen2",
+    "SM8950" to "8gen2",
+    "SM8975" to "8gen2",
 )
 
 sealed class DownloadResult {
@@ -124,7 +126,7 @@ data class Model(
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
     val isAnima: Boolean = false,
-    // DiT packages run by libdit_engine.so: "zimage", "klein" or "qwen21".
+    // DiT packages run by libdit_engine.so: "zimage", "klein", "qwen21" or "krea2turbo".
     val ditKind: String = "",
     // Files that make up a package downloaded file-by-file rather than as one
     // zip, as "<path under baseUrl>|<name on disk>" pairs. Used by the DiT
@@ -297,6 +299,21 @@ data class Model(
                 "qwen_image_2.1_vae_bf16.safetensors|vae.safetensors",
         )
 
+        val QWEN_IMAGE_2_1_TURBO_PACKAGE_FILES = listOf(
+            "unsloth/Qwen-Image-2.1-Turbo-FP8/resolve/main/" +
+                "Qwen-Image-2.1-Turbo-FP8.safetensors|dit.safetensors",
+        ) + QWEN_IMAGE_2_1_PACKAGE_FILES.drop(1)
+
+        val KREA_2_TURBO_PACKAGE_FILES = listOf(
+            "gguf-org/krea-2-gguf/resolve/main/krea2_turbo-mxfp4_moe.gguf|dit.gguf",
+            "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
+                "Qwen_Qwen3-VL-4B-Instruct-Q4_0.gguf|llm.gguf",
+            "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
+                "mmproj-Qwen_Qwen3-VL-4B-Instruct-f16.gguf|llm_vision.gguf",
+            "Qwen/Qwen3-VL-4B-Instruct/resolve/main/tokenizer.json|tokenizer.json",
+            "Osrivers/wan_2.1_vae.safetensors/resolve/main/wan_2.1_vae.safetensors|vae.safetensors",
+        )
+
         fun isDeviceSupported(): Boolean {
             val soc = getDeviceSoc()
             return getChipsetSuffix(soc) != null
@@ -389,6 +406,7 @@ data class Model(
         const val MARKER_ZIMAGE = "ZIMAGE"
         const val MARKER_KLEIN = "KLEIN"
         const val MARKER_QWEN_IMAGE_2_1 = "QWEN_IMAGE_2_1"
+        const val MARKER_KREA_2_TURBO = "KREA_2_TURBO"
         const val MARKER_ANIMA = "ANIMA"
         const val MARKER_SDXL = "SDXL"
         const val MARKER_FINISHED = "finished"
@@ -397,6 +415,7 @@ data class Model(
             MARKER_ZIMAGE,
             MARKER_KLEIN,
             MARKER_QWEN_IMAGE_2_1,
+            MARKER_KREA_2_TURBO,
             MARKER_ANIMA,
             MARKER_SDXL,
             MARKER_FINISHED,
@@ -407,6 +426,7 @@ data class Model(
             "zimage" -> MARKER_ZIMAGE
             "klein" -> MARKER_KLEIN
             "qwen21" -> MARKER_QWEN_IMAGE_2_1
+            "krea2turbo" -> MARKER_KREA_2_TURBO
             else -> ""
         }
 
@@ -602,6 +622,9 @@ class ModelRepository private constructor(private val context: Context) {
                     File(dir, Model.MARKER_QWEN_IMAGE_2_1).isFile && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21"))
 
+                    File(dir, Model.MARKER_KREA_2_TURBO).isFile && DitEngine.isSupportedDevice() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, ditKind = "krea2turbo"))
+
                     File(dir, Model.MARKER_ANIMA).isFile ->
                         customModels.add(createCustomModel(dir, isNpu = true, isAnima = true))
 
@@ -662,6 +685,8 @@ class ModelRepository private constructor(private val context: Context) {
                 add(createZImageTurboModel())
                 add(createFlux2KleinModel())
                 add(createQwenImage21Model())
+                add(createQwenImage21Model(turbo = true))
+                add(createKrea2TurboModel())
             }
             if (isSdxlCapableSoc(getDeviceSoc())) {
                 add(createIllustriousV16Model())
@@ -753,33 +778,38 @@ class ModelRepository private constructor(private val context: Context) {
         )
     }
 
-    private fun createQwenImage21Model(): Model {
-        val id = "qwen_image_2_1"
-        // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
-        // replaced it and nothing reads the old file, so reclaim its 4GB —
-        // but only once the replacement is actually on disk. This runs on every
-        // list refresh, and the models folder may be one the user picked in
-        // Settings, where deleting his weights without asking is not ours to do.
-        val modelDir = File(Model.getModelsDir(context), id)
-        if (File(modelDir, "dit.safetensors").isFile) File(modelDir, "dit.gguf").delete()
+    private fun createQwenImage21Model(turbo: Boolean = false): Model {
+        val id = if (turbo) "qwen_image_2_1_turbo" else "qwen_image_2_1"
+        val packageFiles = if (turbo) Model.QWEN_IMAGE_2_1_TURBO_PACKAGE_FILES else Model.QWEN_IMAGE_2_1_PACKAGE_FILES
+        if (!turbo) {
+            // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
+            // replaced it and nothing reads the old file, so reclaim its 4GB —
+            // but only once the replacement is actually on disk. This runs on every
+            // list refresh, and the models folder may be one the user picked in
+            // Settings, where deleting his weights without asking is not ours to do.
+            val modelDir = File(Model.getModelsDir(context), id)
+            if (File(modelDir, "dit.safetensors").isFile) File(modelDir, "dit.gguf").delete()
+        }
         return Model(
             id = id,
-            name = "Qwen Image 2.1",
-            description = context.getString(R.string.qwen_image_2_1_description),
+            name = if (turbo) "Qwen Image 2.1 Turbo" else "Qwen Image 2.1",
+            description = context.getString(
+                if (turbo) R.string.qwen_image_2_1_turbo_description else R.string.qwen_image_2_1_description,
+            ),
             baseUrl = baseUrl,
-            packageFiles = Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
+            packageFiles = packageFiles,
             generationSize = 1024,
             approximateSize = "13.7GB",
             isDownloaded = Model.isDitPackageDownloaded(
                 context,
                 id,
                 "qwen21",
-                Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
+                packageFiles,
             ),
             codeDefaults = ModelConfig(
                 prompt = "a lovely cat holding a sign that says 'Qwen Image 2.1',",
                 negativePrompt = "",
-                steps = 20f,
+                steps = if (turbo) 8f else 20f,
                 cfg = 1f,
                 scheduler = "euler",
                 denoiseStrength = 1f,
@@ -789,7 +819,36 @@ class ModelRepository private constructor(private val context: Context) {
         )
     }
 
-    private fun isSdxlCapableSoc(soc: String): Boolean = soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P", "SM8845", "SM8650")
+    private fun createKrea2TurboModel(): Model {
+        val id = "krea_2_turbo"
+        return Model(
+            id = id,
+            name = "Krea 2 Turbo",
+            description = context.getString(R.string.krea_2_turbo_description),
+            baseUrl = baseUrl,
+            packageFiles = Model.KREA_2_TURBO_PACKAGE_FILES,
+            generationSize = 1024,
+            approximateSize = "9.6GB",
+            isDownloaded = Model.isDitPackageDownloaded(
+                context,
+                id,
+                "krea2turbo",
+                Model.KREA_2_TURBO_PACKAGE_FILES,
+            ),
+            codeDefaults = ModelConfig(
+                prompt = "a lovely cat wearing black sunglasses, studio photo,",
+                negativePrompt = "",
+                steps = 8f,
+                cfg = 1f,
+                scheduler = "euler",
+                denoiseStrength = 1f,
+            ),
+            runOnCpu = false,
+            ditKind = "krea2turbo",
+        )
+    }
+
+    private fun isSdxlCapableSoc(soc: String): Boolean = soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P", "SM8845", "SM8950", "SM8975", "SM8650")
 
     private fun createCyberRealisticV10Model(): Model {
         val id = "cyber_realistic_v10"
@@ -1173,6 +1232,7 @@ class ModelRepository private constructor(private val context: Context) {
             "absoluterealitycpu", "chilloutmixcpu",
             // DiT
             "z_image_turbo", "flux2_klein_4b", "qwen_image_2_1",
+            "qwen_image_2_1_turbo", "krea_2_turbo",
         )
 
         // Case-sensitive like app storage (ext4). Pass ignoreCase where the

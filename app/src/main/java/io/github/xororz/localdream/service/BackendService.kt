@@ -97,7 +97,7 @@ class BackendService : Service() {
 
         // --type values served by the downloadable DiT engine.
         fun isDitBackend(backendType: String): Boolean = backendType == "zimage" ||
-            backendType == "klein" || backendType == "qwen21"
+            backendType == "klein" || backendType == "qwen21" || backendType == "krea2turbo"
 
         private object StateHolder {
             val _backendState = MutableStateFlow<BackendState>(BackendState.Idle)

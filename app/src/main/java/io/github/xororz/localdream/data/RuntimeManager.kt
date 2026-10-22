@@ -20,7 +20,7 @@ object RuntimeManager {
      * QNN SDK revision the shipped runtime libs are built against. Keep in sync
      * with the SDK the native build pulls in (QNN_SDK_ROOT in CMakeLists.txt).
      */
-    const val RUNTIME_VERSION = "qnn_2_50_0_260828"
+    const val RUNTIME_VERSION = "qnn_2_51_0_260929"
     private const val RUNTIME_VERSION_FILE = ".runtime_version"
 
     /** Returns the runtime base directory (always internal storage). */
