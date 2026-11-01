@@ -120,8 +120,10 @@
     <string name="unsupport_npu">Your device is not supported. Try the CPU model please.</string>
     <string name="cpu_models">CPU/GPU Models</string>
     <string name="npu_models">NPU Models</string>
+    <string name="dit_models">DiT Models</string>
     <string name="no_cpu_models">No Models</string>
     <string name="no_npu_models">No Models</string>
+    <string name="no_dit_models">No Models</string>
     <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems. Turning it off also disables SDXL aspect ratio and UltraFix.</string>
     <string name="show_process">Show Generation Process</string>
     <string name="show_process_hint">Only works for NPU models. Show intermediate generation steps. This will slow down generation speed. Enable only when curious about the process.</string>
@@ -463,6 +465,8 @@
     <string name="dit_engine_missing">DiT engine not installed</string>
     <string name="z_image_turbo_description">6B DiT, 8 steps.</string>
     <string name="flux2_klein_description">4B DiT, 4 steps.</string>
+    <string name="flux2_klein_9b_description">9B DiT, 4 steps.</string>
+    <string name="flux3_description">6B DiT, 16 steps.</string>
     <string name="qwen_image_2_1_description">FP8 DiT with Qwen3-VL-8B, 20 steps.</string>
     <string name="qwen_image_2_1_turbo_description">FP8 DiT with Qwen3-VL-8B, 8 steps.</string>
     <string name="krea_2_turbo_description">12B DiT, 8 steps.</string>

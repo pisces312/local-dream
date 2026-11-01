@@ -117,8 +117,10 @@
     <string name="unsupport_npu">您的设备暂不支持，请使用CPU版本</string>
     <string name="cpu_models">CPU/GPU 模型</string>
     <string name="npu_models">NPU Models</string>
+    <string name="dit_models">DiT Models</string>
     <string name="no_cpu_models">暂无模型</string>
     <string name="no_npu_models">暂无模型</string>
+    <string name="no_dit_models">暂无模型</string>
     <string name="img2img_hint">开启img2img功能，如果你不需要或遇到问题请关闭。关闭后SDXL宽高比和UltraFix将无法使用</string>
     <string name="show_process">显示生成过程</string>
     <string name="show_process_hint">仅对NPU模型生效。开启后将显示扩散模型的中间生成步骤。这会降低生成速度，仅在好奇图像生成过程时开启，正常情况下请关闭。</string>
@@ -448,6 +450,8 @@
     <string name="dit_engine_missing">DiT 引擎未安装</string>
     <string name="z_image_turbo_description">6B DiT，8 步。</string>
     <string name="flux2_klein_description">4B DiT，4 步。</string>
+    <string name="flux2_klein_9b_description">9B DiT，4 步。</string>
+    <string name="flux3_description">6B DiT，16 步。</string>
     <string name="qwen_image_2_1_description">FP8 DiT + Qwen3-VL-8B，20 步。</string>
     <string name="qwen_image_2_1_turbo_description">FP8 DiT + Qwen3-VL-8B，8 步。</string>
     <string name="krea_2_turbo_description">12B DiT，8 步。</string>

@@ -268,9 +268,8 @@ data class Model(
         // Where each part of a DiT package comes from, and the name the
         // native side expects on disk (see PipelineDit). The weights are
         // pulled from the repositories that publish them rather than rehosted:
-        // the FP8 DiTs are Apache-2.0 releases from their authors, and the
-        // Qwen3-4B text encoder and VAE come from the upstream Adreno packages
-        // already converted to the formats stable-diffusion.cpp reads.
+        // DiTs, text encoders and VAEs are already converted to the formats
+        // stable-diffusion.cpp reads.
         val ZIMAGE_PACKAGE_FILES = listOf(
             "Kijai/Z-Image_comfy_fp8_scaled/resolve/main/" +
                 "z-image-turbo_fp8_scaled_e4m3fn_KJ.safetensors|dit.safetensors",
@@ -285,6 +284,22 @@ data class Model(
             "zhiyuanasad/flux2_klein_adreno/resolve/main/llm.gguf|llm.gguf",
             "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
             "Qwen/Qwen3-4B/resolve/main/tokenizer.json|tokenizer.json",
+        )
+
+        val KLEIN_9B_PACKAGE_FILES = listOf(
+            "leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q4_0.gguf|dit.gguf",
+            "bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_0.gguf|llm.gguf",
+            "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
+            "Qwen/Qwen3-8B/resolve/main/tokenizer.json|tokenizer.json",
+        )
+
+        val FLUX3_PACKAGE_FILES = listOf(
+            "unsloth/flux-3-image-klein/resolve/main/variants/fp8r/" +
+                "model.safetensors|dit.safetensors",
+            "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
+                "Qwen_Qwen3-VL-4B-Instruct-Q4_0.gguf|llm.gguf",
+            "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
+            "Qwen/Qwen3-VL-4B-Instruct/resolve/main/tokenizer.json|tokenizer.json",
         )
 
         val QWEN_IMAGE_2_1_PACKAGE_FILES = listOf(
@@ -684,6 +699,8 @@ class ModelRepository private constructor(private val context: Context) {
             if (DitEngine.isSupportedDevice()) {
                 add(createZImageTurboModel())
                 add(createFlux2KleinModel())
+                add(createFlux2KleinModel(nineB = true))
+                add(createFlux3Model())
                 add(createQwenImage21Model())
                 add(createQwenImage21Model(turbo = true))
                 add(createKrea2TurboModel())
@@ -747,21 +764,24 @@ class ModelRepository private constructor(private val context: Context) {
         )
     }
 
-    private fun createFlux2KleinModel(): Model {
-        val id = "flux2_klein_4b"
+    private fun createFlux2KleinModel(nineB: Boolean = false): Model {
+        val id = if (nineB) "flux2_klein_9b" else "flux2_klein_4b"
+        val packageFiles = if (nineB) Model.KLEIN_9B_PACKAGE_FILES else Model.KLEIN_PACKAGE_FILES
         return Model(
             id = id,
-            name = "FLUX.2 Klein 4B",
-            description = context.getString(R.string.flux2_klein_description),
+            name = if (nineB) "FLUX.2 Klein 9B" else "FLUX.2 Klein 4B",
+            description = context.getString(
+                if (nineB) R.string.flux2_klein_9b_description else R.string.flux2_klein_description,
+            ),
             baseUrl = baseUrl,
-            packageFiles = Model.KLEIN_PACKAGE_FILES,
+            packageFiles = packageFiles,
             generationSize = 1024,
-            approximateSize = "6.7GB",
+            approximateSize = if (nineB) "10.8GB" else "6.7GB",
             isDownloaded = Model.isDitPackageDownloaded(
                 context,
                 id,
                 "klein",
-                Model.KLEIN_PACKAGE_FILES,
+                packageFiles,
             ),
             codeDefaults = ModelConfig(
                 prompt = "a lovely cat wearing black sunglasses, studio photo,",
@@ -774,6 +794,36 @@ class ModelRepository private constructor(private val context: Context) {
                 denoiseStrength = 1f,
             ),
             runOnCpu = false,
+            ditKind = "klein",
+        )
+    }
+
+    private fun createFlux3Model(): Model {
+        val id = "flux3_image_klein"
+        return Model(
+            id = id,
+            name = "FLUX.3 Image Klein",
+            description = context.getString(R.string.flux3_description),
+            baseUrl = baseUrl,
+            packageFiles = Model.FLUX3_PACKAGE_FILES,
+            generationSize = 1024,
+            approximateSize = "9.0GB",
+            isDownloaded = Model.isDitPackageDownloaded(
+                context,
+                id,
+                "klein",
+                Model.FLUX3_PACKAGE_FILES,
+            ),
+            codeDefaults = ModelConfig(
+                prompt = "a lovely cat wearing black sunglasses, studio photo,",
+                negativePrompt = "",
+                steps = 16f,
+                cfg = 1f,
+                scheduler = "euler",
+                denoiseStrength = 1f,
+            ),
+            runOnCpu = false,
+            // Klein's reference path applies; sd.cpp detects the model from its weights.
             ditKind = "klein",
         )
     }
@@ -1231,8 +1281,8 @@ class ModelRepository private constructor(private val context: Context) {
             "anythingv5cpu", "qteamixcpu", "cuteyukimixcpu",
             "absoluterealitycpu", "chilloutmixcpu",
             // DiT
-            "z_image_turbo", "flux2_klein_4b", "qwen_image_2_1",
-            "qwen_image_2_1_turbo", "krea_2_turbo",
+            "z_image_turbo", "flux2_klein_4b", "flux2_klein_9b", "qwen_image_2_1",
+            "flux3_image_klein", "qwen_image_2_1_turbo", "krea_2_turbo",
         )
 
         // Case-sensitive like app storage (ext4). Pass ignoreCase where the
