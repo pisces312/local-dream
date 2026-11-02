@@ -1,17 +1,18 @@
 # Local Dream 使用说明
 
-## 双模型页面
+## 模型页面
 
-App 主界面有两个模型标签页：
+App 主界面有三个模型标签页：
 
 | 标签 | 说明 | 推理后端 |
 |------|------|----------|
-| **CPU/GPU 模型** | SD 1.5 模型 | MNN（OpenCL） |
-| **NPU 模型** | SD 1.5 / SDXL 模型 | QNN HTP（骁龙 NPU） |
+| **CPU Models** | SD 1.5 模型 | MNN（OpenCL） |
+| **NPU Models** | SD 1.5 / SDXL 模型 | QNN HTP（骁龙 NPU） |
+| **DiT Models** | DiT 模型（Z-Image / FLUX / Qwen Image 等） | DiT 引擎（HTP） |
 
-### CPU/GPU 模型（标签页标题：CPU/GPU Models）
+### CPU 模型（标签页标题：CPU Models）
 
-虽然标签叫 "CPU/GPU"，实际上这些模型使用 **MNN 推理引擎**，支持两种设备：
+这些模型使用 **MNN 推理引擎**，支持两种设备：
 
 - **CPU**：纯 ARM NEON 加速，所有设备通用
 - **GPU**：通过 OpenCL 后端在 Adreno GPU 上运行，速度更快
