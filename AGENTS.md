@@ -169,7 +169,7 @@ export KEY_ALIAS='pisces312'          # 可省，默认 pisces312
 
 ## 重要注意事项
 
-- **SampleApp patch 已直接入库**：`3rdparty/SampleApp/src/` 中的源文件已包含 mmap、convertToFloatInto 等改动，不需要运行时 apply `SampleApp.patch`。`SampleApp.patch` 仅为历史归档。
+- **SampleApp patch 每次 core configure 都会施加**：`3rdparty/SampleApp/` 被 `app/src/main/cpp/.gitignore` 忽略，目录里的改动不入库；`app/src/main/cpp/CMakeLists.txt` 每次 configure 先把 QAIRT SDK 自带的 SampleApp 复制进 build 目录，再用 `git apply` 把 `app/src/main/cpp/SampleApp.patch` 打到这份副本上（mmap 读取、跳过输出目录/输入列表读取）。删掉该 patch 会让 core configure 直接 `FATAL_ERROR`。本地目录里看到的已打补丁源码只是构建副产物，不是「已直接入库」。
 - **tokenizers-cpp 子模块**：已 fork 到 `pisces312/tokenizers-cpp`，含 Rust 1.96 autoref 修复 (`fix/rust-1.96-autoref`)。
 - **ccache 禁用**：CMakePresets.json 配置了 `CMAKE_C_COMPILER_LAUNCHER=ccache`，Windows 下必须传入 `-DCMAKE_C_COMPILER_LAUNCHER="" -DCMAKE_CXX_COMPILER_LAUNCHER=""`。
 - **Ninja 路径**：必须显式指定 `-DCMAKE_MAKE_PROGRAM=...`，避免 cmake 找到不兼容版本。
