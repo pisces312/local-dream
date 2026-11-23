@@ -76,6 +76,9 @@ python3 "$REPO_ROOT/tools/collect-build-info.py" \
     --toolchain-path "hexagonSdk=$HEXAGON_SDK_ROOT" \
     --toolchain "cmake=${CMAKE_VERSION:-unknown}" \
     --artifact "$JNI_DIR/libdit_engine.so" \
+    --artifact "$ASSET_DIR/libggml-htp-v73.so" \
+    --artifact "$ASSET_DIR/libggml-htp-v75.so" \
     --artifact "$ASSET_DIR/libggml-htp-v79.so" \
     --artifact "$ASSET_DIR/libggml-htp-v81.so" \
+    --artifact "$ASSET_DIR/libggml-htp-v85.so" \
     || echo "WARNING: could not write the build-info manifest"
