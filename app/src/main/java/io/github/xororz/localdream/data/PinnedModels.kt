@@ -39,6 +39,15 @@ object PinnedModels {
         if (next.size != current.size) save(context, next)
     }
 
+    // Drop ids that no longer name an installed model. A pin can only be
+    // created from an installed model's selection menu, so a leftover id means
+    // the folder was deleted outside the app (deleteModel() unpins itself).
+    fun retainInstalled(context: Context, installedIds: Set<String>) {
+        val current = get(context)
+        val next = current.filter { it in installedIds }
+        if (next.size != current.size) save(context, next)
+    }
+
     // Keep a pin across a model id change, preserving its position.
     fun rename(context: Context, oldId: String, newId: String) {
         val current = get(context)

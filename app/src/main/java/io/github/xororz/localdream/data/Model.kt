@@ -1262,6 +1262,17 @@ class ModelRepository private constructor(private val context: Context) {
                 Model.backfillCompleteMarkers(Model.getModelsDir(context))
                 initializeModels()
             }
+            // A pin can only be created from an installed model, so ids left
+            // over after a folder was deleted outside the app can never be
+            // unpinned and are dropped here. Only safe while the storage
+            // answers: with a revoked or unreachable root every model reads as
+            // uninstalled, and pruning would wipe valid pins.
+            if (storageProblem == null) {
+                PinnedModels.retainInstalled(
+                    context,
+                    models.asSequence().filter { it.isDownloaded }.map { it.id }.toSet(),
+                )
+            }
             isLoaded = true
         }
     }

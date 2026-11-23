@@ -24,6 +24,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -55,6 +56,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -310,6 +312,13 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     val modelRepository = remember { ModelRepository.getInstance(context) }
     val upscalerRepository = remember { UpscalerRepository.getInstance(context) }
     val remoteRepository = remember { RemoteRepository.getInstance(context) }
+
+    // A scan can prune pins whose model folder was deleted outside the app.
+    // Re-read the list after one so the badge and pinned-first order follow
+    // without the screen being recreated.
+    LaunchedEffect(modelRepository.models, modelRepository.storageProblem) {
+        pinnedIds = PinnedModels.get(context)
+    }
     // Connected-device mode: the list shows the host device's installed
     // models; all local management actions (download/import/delete/rename)
     // are hidden because they would act on this device's storage.
@@ -1183,6 +1192,10 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             isSelected = selectedModels.contains(model),
                             isSelectionMode = isSelectionMode,
                             isPinned = model.id in pinnedIds,
+                            onUnpinClick = {
+                                PinnedModels.unpin(context, listOf(model.id))
+                                pinnedIds = PinnedModels.get(context)
+                            },
                             onClick = {
                                 if (remoteActive) {
                                     // The model runs on the host device, so this
@@ -2184,6 +2197,7 @@ fun ModelCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     isPinned: Boolean = false,
+    onUnpinClick: () -> Unit = {},
 ) {
     val isDisabledInSelection = !model.isDownloaded && isSelectionMode
 
@@ -2272,12 +2286,24 @@ fun ModelCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     if (isPinned) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = stringResource(R.string.pin_to_top),
-                            tint = primaryContent,
-                            modifier = Modifier.size(18.dp),
-                        )
+                        // The badge is also the unpin control: without it a
+                        // pinned model that is no longer installed has no
+                        // reachable unpin action (selection mode only selects
+                        // downloaded models).
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .clickable(role = Role.Button, onClick = onUnpinClick),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = stringResource(R.string.unpin_from_top),
+                                tint = primaryContent,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                     Text(
                         text = model.name,
