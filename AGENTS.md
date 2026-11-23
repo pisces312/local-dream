@@ -15,6 +15,13 @@ app/src/main/
 └── res/          # 多语言字符串
 ```
 
+## 文档存放约定
+
+**设计、升级、调研、构建记录等文档统一放在 `D:/workspace/design/local-dream/`，不放进本仓库。**
+该目录由 `D:/workspace` 仓库管理；本仓库的 `docs/` 已于 2026-11-23 清空并删除（原有 18 份文档
+全部为 fork 自有，上游无 `docs/`）。需要引用文档时用该目录下的文件名，例如
+`D:/workspace/design/local-dream/2026-11-23-alpha8-upstream-sync-build.md`。
+
 ## 构建环境
 
 | 项目 | 路径 |
@@ -101,7 +108,7 @@ WSL 里没有 `cygpath`，且 `zipalign` 是 Windows PE，**不要**在 WSL 执�
 # core（libstable_diffusion_core.so + qnnlibs）
 #   AI 工具执行时：在 Git Bash 里直调 cmake.exe，不要走 PowerShell 工具（会被沙箱
 #   静默拦截：零输出秒退）；并先 export MSYS2_ARG_CONV_EXCL='*'。
-#   详见 docs/2026-09-19-dit-engine-build.md 踩坑记录第 7 条。
+#   详见 D:/workspace/design/local-dream/2026-09-19-dit-engine-build.md 踩坑记录第 7 条。
 rebuild-native.bat    # Windows CMD, 或手动:
 export ANDROID_NDK_ROOT=D:/dev/android_sdk/ndk/28.2.13676358
 export QAIRT_PATH=D:/dev/qairt/2.51.0.260929
@@ -117,7 +124,7 @@ cp -r build/android/qnnlibs/* ../../assets/qnnlibs/
 # 「Native 重建必须同步 build-info」。
 
 # DiT engine（libdit_engine.so + HTP skels）— WSL2 + Hexagon SDK，见
-# docs/2026-09-19-dit-engine-build.md。ABI 变更时两侧都要重建。
+# D:/workspace/design/local-dream/2026-09-19-dit-engine-build.md。ABI 变更时两侧都要重建。
 ```
 
 ## 正式版（release）签名必须走环境变量
